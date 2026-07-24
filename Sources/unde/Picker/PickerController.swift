@@ -1,0 +1,314 @@
+import AppKit
+import SwiftUI
+import Carbon.HIToolbox
+
+/// Owns the picker panel, its SwiftUI content, selection state, and all keyboard
+/// handling. The panel and its full view hierarchy are constructed once here and
+/// only shown/hidden afterwards — never rebuilt — to keep hotkey→visible inside
+/// the 50ms budget.
+final class PickerController: NSObject, NSWindowDelegate {
+
+    private let history: HistoryStore
+    private let snippets: SnippetStore
+    private let paster: Paster
+
+    private let model = PickerModel()
+    private let panel = PickerPanel()
+    private var hostingView: NSHostingView<PickerView>!
+
+    private var eventMonitor: Any?
+    private var previousApp: NSRunningApplication?
+    private var isVisible = false
+    private var isDismissing = false
+
+    init(history: HistoryStore, snippets: SnippetStore, paster: Paster) {
+        self.history = history
+        self.snippets = snippets
+        self.paster = paster
+        super.init()
+
+        let view = PickerView(
+            model: model,
+            onClickRow: { [weak self] index in self?.commit(at: index, mode: .pasteInPlace) },
+            onHoverRow: { [weak self] index in self?.model.selection = index }
+        )
+        hostingView = NSHostingView(rootView: view)
+        panel.contentView = hostingView
+        panel.delegate = self
+    }
+
+    // MARK: Show / hide
+
+    func toggle() {
+        isVisible ? hide() : show()
+    }
+
+    func show() {
+        guard !isVisible else { return }
+        // Capture the app the user is working in *before* we show anything.
+        previousApp = NSWorkspace.shared.frontmostApplication
+
+        model.query = ""
+        model.selection = 0
+        model.accessibilityTrusted = Permissions.isAccessibilityTrusted
+        rebuildRows()
+
+        // Size the panel to its content, then place it on the display under the
+        // cursor, centred horizontally, in the upper third (INV-5).
+        hostingView.layoutSubtreeIfNeeded()
+        let size = hostingView.fittingSize
+        panel.setContentSize(size)
+        positionPanel(size: size)
+
+        panel.orderFrontRegardless()
+        panel.makeKey()
+        installEventMonitor()
+        isVisible = true
+    }
+
+    func hide() {
+        guard isVisible else { return }
+        isDismissing = true
+        removeEventMonitor()
+        panel.orderOut(nil)
+        isVisible = false
+        isDismissing = false
+    }
+
+    private func positionPanel(size: NSSize) {
+        let mouse = NSEvent.mouseLocation
+        let screen = NSScreen.screens.first { $0.frame.contains(mouse) } ?? NSScreen.main
+        guard let visible = screen?.visibleFrame else { return }
+        let x = visible.midX - size.width / 2
+        let topInset = visible.height * 0.14
+        let y = visible.maxY - topInset - size.height
+        panel.setFrameOrigin(NSPoint(x: x.rounded(), y: y.rounded()))
+    }
+
+    // MARK: Row building
+
+    private func rebuildRows() {
+        let query = model.query.trimmingCharacters(in: .whitespaces)
+
+        // Pinned snippets: filtered by query but never reordered by it (SEL-4).
+        let pinned = snippets.ordered.filter { snippet in
+            query.isEmpty
+                || FuzzyMatcher.matches(query: query, candidate: snippet.title)
+                || FuzzyMatcher.matches(query: query, candidate: snippet.content)
+        }.map { snippet in
+            DisplayRow(
+                id: "s-\(snippet.id.uuidString)",
+                kind: .pinned,
+                title: snippet.title,
+                subtitle: snippet.label != nil ? snippet.content.replacingOccurrences(of: "\n", with: "  ") : nil,
+                meta: nil,
+                slot: snippet.slot,
+                image: nil,
+                snippet: snippet,
+                clip: nil
+            )
+        }
+
+        // Clipboard history: fuzzy-filtered and ranked by score when querying.
+        let clipItems: [ClipboardItem]
+        if query.isEmpty {
+            clipItems = history.items
+        } else {
+            clipItems = history.items
+                .compactMap { item -> (ClipboardItem, Int)? in
+                    guard let score = FuzzyMatcher.score(query: query, candidate: item.preview) else { return nil }
+                    return (item, score)
+                }
+                .sorted { $0.1 > $1.1 }
+                .map { $0.0 }
+        }
+
+        let clips = clipItems.map { item in
+            DisplayRow(
+                id: "c-\(item.id)",
+                kind: .clip,
+                title: item.preview.isEmpty ? "Image" : item.preview,
+                subtitle: nil,
+                meta: "Copied \(Self.relativeTime(item.createdAt)) · \(item.classification)",
+                slot: nil,
+                image: item.image,
+                snippet: nil,
+                clip: item
+            )
+        }
+
+        model.pinnedRows = pinned
+        model.clipRows = clips
+        if model.selection >= model.count {
+            model.selection = max(0, model.count - 1)
+        }
+    }
+
+    // MARK: Selection
+
+    private func move(_ delta: Int) {
+        let n = model.count
+        guard n > 0 else { return }
+        model.selection = (model.selection + delta + n) % n
+    }
+
+    // MARK: Commit / paste
+
+    private func commit(at index: Int, mode: Paster.PasteMode) {
+        let rows = model.allRows
+        guard index >= 0, index < rows.count else { return }
+        performPaste(row: rows[index], mode: mode)
+    }
+
+    private func commitSelected(mode: Paster.PasteMode) {
+        commit(at: model.selection, mode: mode)
+    }
+
+    private func pastePinnedSlot(_ slot: Int) {
+        guard let snippet = snippets.snippet(forSlot: slot) else { return }
+        let row = DisplayRow(
+            id: "s-\(snippet.id.uuidString)", kind: .pinned, title: snippet.title,
+            subtitle: nil, meta: nil, slot: slot, image: nil, snippet: snippet, clip: nil
+        )
+        performPaste(row: row, mode: .pasteInPlace)
+    }
+
+    private func performPaste(row: DisplayRow, mode: Paster.PasteMode) {
+        // Only text paste is wired in v1; images write to the pasteboard via the
+        // same path once image write support lands.
+        let text: String
+        if let snippet = row.snippet {
+            text = snippet.content
+        } else if let clip = row.clip, let t = clip.text {
+            text = t
+        } else {
+            return
+        }
+
+        let app = previousApp
+        hide()
+
+        let outcome = paster.paste(text: text, previousApp: app, mode: mode)
+        switch outcome {
+        case .pasted, .copiedOnly:
+            break
+        case .blockedBySecureInput(let process):
+            let who = process.map { " — \($0) has Secure Keyboard Entry on" } ?? ""
+            NoticePresenter.shared.show("Secure Input active\(who). Press ⌘V to paste.")
+        case .notTrusted:
+            NoticePresenter.shared.show("Accessibility permission needed to paste. It's on the clipboard — press ⌘V.")
+        }
+    }
+
+    private func promoteSelected() {
+        let rows = model.allRows
+        guard model.selection < rows.count, let clip = rows[model.selection].clip, let text = clip.text else { return }
+        snippets.promote(text: text)
+        rebuildRows()
+        NoticePresenter.shared.show("Pinned to snippets")
+    }
+
+    private func deleteSelected() {
+        let rows = model.allRows
+        guard model.selection < rows.count else { return }
+        let row = rows[model.selection]
+        if let clip = row.clip {
+            history.remove(id: clip.id)
+        } else if let snippet = row.snippet {
+            snippets.delete(id: snippet.id)
+        }
+        rebuildRows()
+    }
+
+    // MARK: Keyboard
+
+    private func installEventMonitor() {
+        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
+            guard let self else { return event }
+            return self.handleKeyDown(event) ? nil : event
+        }
+    }
+
+    private func removeEventMonitor() {
+        if let eventMonitor {
+            NSEvent.removeMonitor(eventMonitor)
+            self.eventMonitor = nil
+        }
+    }
+
+    /// Returns true if the event was handled (and should be swallowed).
+    private func handleKeyDown(_ event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let cmd = flags.contains(.command)
+        let ctrl = flags.contains(.control)
+        let shift = flags.contains(.shift)
+        let code = Int(event.keyCode)
+        let chars = event.charactersIgnoringModifiers ?? ""
+
+        // Command combinations first — these fire regardless of filter text.
+        if cmd {
+            if let n = Int(chars), (1...9).contains(n) { pastePinnedSlot(n); return true }
+            if chars == "p" { promoteSelected(); return true }
+            if code == kVK_Delete { deleteSelected(); return true }
+            if code == kVK_Return || code == kVK_ANSI_KeypadEnter { commitSelected(mode: .copyOnly); return true }
+            return true // swallow other cmd combos while open
+        }
+
+        switch code {
+        case kVK_Escape:
+            hide(); return true
+        case kVK_Return, kVK_ANSI_KeypadEnter:
+            commitSelected(mode: shift ? .pasteAsPlainText : .pasteInPlace); return true
+        case kVK_DownArrow:
+            move(1); return true
+        case kVK_UpArrow:
+            move(-1); return true
+        case kVK_Delete: // backspace edits the query
+            if !model.query.isEmpty {
+                model.query.removeLast()
+                rebuildRows()
+            }
+            return true
+        default:
+            break
+        }
+
+        // Emacs-style navigation.
+        if ctrl {
+            if chars == "n" { move(1); return true }
+            if chars == "p" { move(-1); return true }
+            return false
+        }
+
+        // Type-to-filter: accumulate printable characters.
+        if let scalars = event.characters, scalars.count == 1,
+           let first = scalars.unicodeScalars.first,
+           !CharacterSet.controlCharacters.contains(first) {
+            model.query.append(scalars)
+            model.selection = 0
+            rebuildRows()
+            return true
+        }
+
+        return false
+    }
+
+    // MARK: NSWindowDelegate
+
+    func windowDidResignKey(_ notification: Notification) {
+        // Loss of key status dismisses (INV-4), unless we're already hiding as
+        // part of a paste.
+        guard isVisible, !isDismissing else { return }
+        hide()
+    }
+
+    // MARK: Helpers
+
+    static func relativeTime(_ date: Date) -> String {
+        let seconds = Date().timeIntervalSince(date)
+        if seconds < 60 { return "just now" }
+        if seconds < 3600 { return "\(Int(seconds / 60))m ago" }
+        if seconds < 86400 { return "\(Int(seconds / 3600))h ago" }
+        return "\(Int(seconds / 86400))d ago"
+    }
+}
