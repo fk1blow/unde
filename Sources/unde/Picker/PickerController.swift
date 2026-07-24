@@ -135,17 +135,20 @@ final class PickerController: NSObject, NSWindowDelegate {
         let query = model.query.trimmingCharacters(in: .whitespaces)
 
         // Pinned snippets: filtered by query but never reordered by it (SEL-4).
-        let pinned = snippets.ordered.filter { snippet in
-            query.isEmpty
+        // The ⌘n badge is the snippet's *position* in the ordered list (1–9), not
+        // its stored slot — so with two pinned items you always see ⌘1 and ⌘2,
+        // never a gap like ⌘3 left behind by a deleted slot.
+        let pinned = snippets.ordered.enumerated().compactMap { index, snippet -> DisplayRow? in
+            let matches = query.isEmpty
                 || FuzzyMatcher.matches(query: query, candidate: snippet.title)
                 || FuzzyMatcher.matches(query: query, candidate: snippet.content)
-        }.map { snippet in
-            DisplayRow(
+            guard matches else { return nil }
+            return DisplayRow(
                 id: "s-\(snippet.id.uuidString)",
                 kind: .pinned,
                 text: snippet.content.replacingOccurrences(of: "\n", with: "  "),
                 meta: nil,
-                slot: snippet.slot,
+                slot: index < 9 ? index + 1 : nil,
                 image: nil,
                 snippet: snippet,
                 clip: nil
@@ -208,31 +211,38 @@ final class PickerController: NSObject, NSWindowDelegate {
         commit(at: model.selection, mode: mode)
     }
 
-    private func pastePinnedSlot(_ slot: Int) {
-        guard let snippet = snippets.snippet(forSlot: slot) else { return }
+    /// ⌘n pastes the n-th pinned snippet by display order, matching the ⌘n badge
+    /// shown on the row (positional, not the stored slot).
+    private func pastePinnedSlot(_ position: Int) {
+        let ordered = snippets.ordered
+        guard position >= 1, position <= min(9, ordered.count) else { return }
+        let snippet = ordered[position - 1]
         let row = DisplayRow(
             id: "s-\(snippet.id.uuidString)", kind: .pinned, text: snippet.content,
-            meta: nil, slot: slot, image: nil, snippet: snippet, clip: nil
+            meta: nil, slot: position, image: nil, snippet: snippet, clip: nil
         )
         performPaste(row: row, mode: .pasteInPlace)
     }
 
     private func performPaste(row: DisplayRow, mode: Paster.PasteMode) {
-        // Only text paste is wired in v1; images write to the pasteboard via the
-        // same path once image write support lands.
-        let text: String
+        let app = previousApp
+        let outcome: Paster.Outcome
+
         if let snippet = row.snippet {
-            text = snippet.content
-        } else if let clip = row.clip, let t = clip.text {
-            text = t
+            hide()
+            outcome = paster.paste(text: snippet.content, previousApp: app, mode: mode)
+        } else if let text = row.clip?.text {
+            hide()
+            outcome = paster.paste(text: text, previousApp: app, mode: mode)
+        } else if let clip = row.clip, clip.kind == .image,
+                  let path = clip.imagePath, let data = imageStore?.loadData(path: path) {
+            // Image paste: put the stored bytes back on the pasteboard, then ⌘V.
+            hide()
+            outcome = paster.paste(imageData: data, previousApp: app, mode: mode)
         } else {
             return
         }
 
-        let app = previousApp
-        hide()
-
-        let outcome = paster.paste(text: text, previousApp: app, mode: mode)
         switch outcome {
         case .pasted, .copiedOnly:
             break

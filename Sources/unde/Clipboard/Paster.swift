@@ -34,15 +34,31 @@ final class Paster {
         case notTrusted
     }
 
+    /// A payload we can put on the pasteboard and paste.
+    private enum Payload {
+        case text(String)
+        case image(Data)   // PNG bytes
+    }
+
     /// Perform the full paste sequence for a text payload. `previousApp` is the
     /// app that was frontmost when the picker opened, to be re-activated.
     @discardableResult
     func paste(text: String, previousApp: NSRunningApplication?, mode: PasteMode) -> Outcome {
+        paste(.text(text), previousApp: previousApp, mode: mode)
+    }
+
+    /// Same, for an image payload (PNG bytes).
+    @discardableResult
+    func paste(imageData: Data, previousApp: NSRunningApplication?, mode: PasteMode) -> Outcome {
+        paste(.image(imageData), previousApp: previousApp, mode: mode)
+    }
+
+    private func paste(_ payload: Payload, previousApp: NSRunningApplication?, mode: PasteMode) -> Outcome {
         // 1. Snapshot the user's current pasteboard so we can restore it (PST-5).
         let snapshot = prefs.restorePasteboard ? snapshotPasteboard() : nil
 
         // 2. Write our payload and tell the monitor to ignore this change.
-        let changeCount = writeToPasteboard(text: text)
+        let changeCount = writeToPasteboard(payload)
         onWillWrite?(changeCount)
 
         if mode == .copyOnly {
@@ -85,10 +101,20 @@ final class Paster {
 
     // MARK: Pasteboard I/O
 
-    private func writeToPasteboard(text: String) -> Int {
+    private func writeToPasteboard(_ payload: Payload) -> Int {
         let pb = NSPasteboard.general
         pb.clearContents()
-        pb.setString(text, forType: .string)
+        switch payload {
+        case .text(let string):
+            pb.setString(string, forType: .string)
+        case .image(let data):
+            // Write PNG plus a TIFF fallback so both image-savvy apps and those
+            // that only read TIFF accept the paste.
+            pb.setData(data, forType: .png)
+            if let tiff = NSImage(data: data)?.tiffRepresentation {
+                pb.setData(tiff, forType: .tiff)
+            }
+        }
         return pb.changeCount
     }
 

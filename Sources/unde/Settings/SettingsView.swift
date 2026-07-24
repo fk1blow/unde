@@ -55,11 +55,48 @@ struct SettingsView: View {
                             .frame(width: 44, alignment: .trailing)
                     }
                 }
+                scalePreview
             }
         }
         .formStyle(.grouped)
-        .frame(width: 400)
+        .frame(width: 420)
         .fixedSize(horizontal: false, vertical: true)
+    }
+
+    // MARK: Live scale preview
+
+    /// The design-size width and viewport height of the sample. The sample lays
+    /// out at `previewBaseWidth`, is scaled by `uiScale`, then clipped to a fixed
+    /// viewport so the Settings window never has to grow — the rows just render
+    /// larger/smaller in place, exactly as the picker will.
+    private static let previewBaseWidth: CGFloat = 300
+    private static let previewViewportH: CGFloat = 96
+
+    private var scalePreview: some View {
+        let s = CGFloat(uiScale)
+        return VStack(alignment: .leading, spacing: 6) {
+            Text("Preview")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 4) {
+                PickerRow(text: "Q3 roadmap — meeting notes", meta: "clipboard", active: true)
+                PickerRow(text: "https://example.com/design/specs", active: false)
+            }
+            .frame(width: Self.previewBaseWidth, alignment: .topLeading)
+            .scaleEffect(s, anchor: .topLeading)
+            .frame(width: Self.previewBaseWidth, height: Self.previewViewportH, alignment: .topLeading)
+            .clipped()
+            .padding(10)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.surface)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(Theme.neutral500.opacity(0.4), lineWidth: 1)
+            )
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 
     private func toggleRecording() {

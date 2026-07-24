@@ -40,6 +40,12 @@ final class ImageStore {
         NSImage(contentsOf: directory.appendingPathComponent(path))
     }
 
+    /// The raw stored bytes (PNG) for a path — used to put the image back on the
+    /// pasteboard when pasting an image item.
+    func loadData(path: String) -> Data? {
+        try? Data(contentsOf: directory.appendingPathComponent(path))
+    }
+
     func delete(path: String) {
         try? FileManager.default.removeItem(at: directory.appendingPathComponent(path))
     }

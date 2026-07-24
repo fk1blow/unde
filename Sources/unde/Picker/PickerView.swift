@@ -18,6 +18,11 @@ struct PickerView: View {
     /// Past this the text preview stops growing and scrolls instead.
     private static let textPreviewMaxHeight: CGFloat = 320
 
+    /// Scroll-target ids for the section headers, so selecting the first row of a
+    /// section can reveal its label rather than clip it at the top.
+    private static let pinnedHeaderID = "header-pinned"
+    private static let clipHeaderID = "header-clip"
+
     // Layout — the window holds the main card and, when there's something worth
     // showing, a detached preview card floating to its right across a transparent
     // gap. `windowWidth` must match `PickerController.panelWidth`.
@@ -52,9 +57,11 @@ struct PickerView: View {
     private var mainCard: some View {
         VStack(spacing: 0) {
             searchRow
-            Divider().overlay(Theme.divider)
+            // Small gaps so the list doesn't look glued to the search row above
+            // or the status bar below.
+            Divider().overlay(Theme.divider).padding(.bottom, 4)
             list
-            Divider().overlay(Theme.divider)
+            Divider().overlay(Theme.divider).padding(.top, 4)
             footer
         }
         .background(Theme.surface)
@@ -100,6 +107,7 @@ struct PickerView: View {
                 LazyVStack(alignment: .leading, spacing: 2) {
                     if !model.pinnedRows.isEmpty {
                         sectionHeader("Pinned snippets")
+                            .id(Self.pinnedHeaderID)
                         ForEach(Array(model.pinnedRows.enumerated()), id: \.element.id) { offset, row in
                             rowView(row, index: offset)
                         }
@@ -107,6 +115,7 @@ struct PickerView: View {
                     if !model.clipRows.isEmpty {
                         sectionHeader("Clipboard history")
                             .padding(.top, model.pinnedRows.isEmpty ? 0 : 6)
+                            .id(Self.clipHeaderID)
                         ForEach(Array(model.clipRows.enumerated()), id: \.element.id) { offset, row in
                             rowView(row, index: model.pinnedRows.count + offset)
                         }
@@ -135,8 +144,18 @@ struct PickerView: View {
                 // confuse SwiftUI's diffing and leave stale rows highlighted.
                 let rows = model.allRows
                 guard newValue >= 0, newValue < rows.count else { return }
-                let targetID = rows[newValue].id
-                // anchor: nil scrolls the *minimum* amount to keep the row on
+                // When landing on the first row of a section, target the section
+                // header instead of the row, so the label above it is revealed
+                // rather than left clipped at the top edge.
+                let targetID: String
+                if newValue == 0, !model.pinnedRows.isEmpty {
+                    targetID = Self.pinnedHeaderID
+                } else if newValue == model.pinnedRows.count, !model.clipRows.isEmpty {
+                    targetID = Self.clipHeaderID
+                } else {
+                    targetID = rows[newValue].id
+                }
+                // anchor: nil scrolls the *minimum* amount to keep the target on
                 // screen — a fixed anchor re-centers on every keypress and makes
                 // the list lurch. No animation, so stepping feels immediate.
                 proxy.scrollTo(targetID, anchor: nil)
@@ -151,6 +170,7 @@ struct PickerView: View {
     /// tells you everything, so we don't float an extra card for it.
     private enum PreviewKind {
         case image(DisplayRow)
+        case svg(NSImage)    // SVG markup copied as text, rendered
         case text(String)    // multi-line or long-enough-to-be-truncated text
     }
 
@@ -164,8 +184,21 @@ struct PickerView: View {
         // Colours already show a swatch in their row, so they get no preview card.
         let full = row.fullText
         if Self.hexColor(full) != nil { return nil }
+        // SVG markup copied as text: render it so you see the graphic, not the XML.
+        if let svg = Self.renderSVG(full) { return .svg(svg) }
         if full.contains("\n") || full.count > Self.truncationThreshold { return .text(full) }
         return nil
+    }
+
+    /// If the text is SVG markup and the system can rasterise it, return the
+    /// rendered image; otherwise nil (so it falls back to a text preview).
+    private static func renderSVG(_ s: String) -> NSImage? {
+        let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard t.hasPrefix("<"), t.contains("<svg"), t.contains("</svg>") else { return nil }
+        guard let data = t.data(using: .utf8),
+              let image = NSImage(data: data),
+              image.isValid, image.size.width > 0, image.size.height > 0 else { return nil }
+        return image
     }
 
     /// A detached card, floating to the right of the main panel, whose contents
@@ -203,6 +236,13 @@ struct PickerView: View {
                     .frame(width: size.width, height: size.height)
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
+        case .svg(let image):
+            let size = Self.fitSize(width: image.size.width, height: image.size.height)
+            Image(nsImage: image)
+                .resizable()
+                .interpolation(.high)
+                .aspectRatio(contentMode: .fit)
+                .frame(width: size.width, height: size.height)
         case .text(let full):
             ScrollView {
                 Text(full)
@@ -224,8 +264,12 @@ struct PickerView: View {
     /// width and max height while preserving aspect ratio, so the card hugs it
     /// with no letterbox or reserved min-height.
     private static func imageFitSize(_ row: DisplayRow) -> CGSize {
-        let w = CGFloat(row.clip?.imageWidth ?? 0)
-        let h = CGFloat(row.clip?.imageHeight ?? 0)
+        fitSize(width: CGFloat(row.clip?.imageWidth ?? 0), height: CGFloat(row.clip?.imageHeight ?? 0))
+    }
+
+    /// Scale a w×h box to fit the preview content width and max height, preserving
+    /// aspect ratio.
+    private static func fitSize(width w: CGFloat, height h: CGFloat) -> CGSize {
         guard w > 0, h > 0 else {
             return CGSize(width: previewContentWidth, height: 180)
         }
@@ -255,55 +299,17 @@ struct PickerView: View {
 
     private func rowView(_ row: DisplayRow, index: Int) -> some View {
         let active = index == model.selection
-        return HStack(spacing: 11) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(row.text)
-                    .font(.system(size: 14))
-                    .foregroundColor(Theme.text)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                if let meta = row.meta {
-                    Text(meta)
-                        .font(.system(size: 12.5))
-                        .foregroundColor(Theme.neutral600)
-                        .lineLimit(1)
-                }
-            }
-            if let hex = Self.hexColor(row.fullText), let color = Color(hexString: hex) {
-                RoundedRectangle(cornerRadius: 4, style: .continuous)
-                    .fill(color)
-                    .frame(width: 14, height: 14)
-            }
-            Spacer(minLength: 6)
-            if let slot = row.slot {
-                KBD("⌘\(slot)")
-            }
-            Text("⏎")
-                .font(.system(size: 13))
-                .foregroundColor(Theme.accent300)
-                .opacity(active ? 1 : 0)
-        }
-        .padding(.horizontal, 11)
-        .padding(.vertical, 9)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.radiusRow, style: .continuous)
-                .fill(active ? Theme.rowSelectedBG : Color.clear)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.radiusRow, style: .continuous)
-                .strokeBorder(active ? Theme.rowSelectedStroke : Color.clear, lineWidth: 1)
-        )
-        .contentShape(Rectangle())
-        .onTapGesture { onClickRow(index) }
-        .onHover { if $0 { onHoverRow(index) } }
+        let swatch = Self.hexColor(row.fullText).flatMap { Color(hexString: $0) }
+        return PickerRow(text: row.text, meta: row.meta, colorSwatch: swatch, slot: row.slot, active: active)
+            .contentShape(Rectangle())
+            .onTapGesture { onClickRow(index) }
+            .onHover { if $0 { onHoverRow(index) } }
     }
 
     // MARK: Footer
 
     private var footer: some View {
         HStack(spacing: 13) {
-            hint("↑↓", "navigate")
             hint("⏎", "paste")
             hint("⌘P", "pin")
             hint("⌘⌫", "delete")
@@ -314,7 +320,7 @@ struct PickerView: View {
                 .foregroundColor(Theme.neutral500)
         }
         .padding(.horizontal, 18)
-        .padding(.vertical, 10)
+        .padding(.vertical, 14)
     }
 
     private func hint(_ key: String, _ label: String) -> some View {
@@ -334,6 +340,62 @@ private struct TextHeightKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = max(value, nextValue())
+    }
+}
+
+/// The visual content of a single picker row — primary text, optional secondary
+/// meta, an optional colour swatch, an optional ⌘-slot keycap, and the paste
+/// chevron shown when selected. Pure presentation with no interaction, so it can
+/// be reused outside the picker (the Settings UI-scale preview renders it) without
+/// dragging in selection or hover plumbing. `PickerView.rowView` wraps it with the
+/// tap/hover gestures.
+struct PickerRow: View {
+    let text: String
+    var meta: String? = nil
+    var colorSwatch: Color? = nil
+    var slot: Int? = nil
+    let active: Bool
+
+    var body: some View {
+        HStack(spacing: 11) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(text)
+                    .font(.system(size: 14))
+                    .foregroundColor(Theme.text)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                if let meta {
+                    Text(meta)
+                        .font(.system(size: 12.5))
+                        .foregroundColor(Theme.neutral600)
+                        .lineLimit(1)
+                }
+            }
+            if let colorSwatch {
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(colorSwatch)
+                    .frame(width: 14, height: 14)
+            }
+            Spacer(minLength: 6)
+            if let slot {
+                KBD("⌘\(slot)")
+            }
+            Text("⏎")
+                .font(.system(size: 13))
+                .foregroundColor(Theme.accent300)
+                .opacity(active ? 1 : 0)
+        }
+        .padding(.horizontal, 11)
+        .padding(.vertical, 9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.radiusRow, style: .continuous)
+                .fill(active ? Theme.rowSelectedBG : Color.clear)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.radiusRow, style: .continuous)
+                .strokeBorder(active ? Theme.rowSelectedStroke : Color.clear, lineWidth: 1)
+        )
     }
 }
 
