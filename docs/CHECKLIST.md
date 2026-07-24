@@ -48,9 +48,15 @@ pkill -x unde                    # quit
 Data lives in `~/Library/Application Support/unde/` (`snippets.json`).
 Preferences live in `UserDefaults` for `com.codeagency.unde`.
 
-> ⚠️ First launch triggers the **Accessibility** prompt. Grant it in
+> First launch triggers the **Accessibility** prompt. Grant it in
 > System Settings → Privacy & Security → Accessibility for auto-paste to work.
-> Ad-hoc signing means the grant resets on each rebuild (expected — PLAN M7).
+>
+> ✅ **Stable signing is set up.** `build_app.sh` signs with the first codesigning
+> identity in the keychain (currently the Apple Development cert), so the
+> designated requirement — and therefore the Accessibility grant — is identical
+> across rebuilds. Grant once; it persists. Override with `UNDE_SIGN_IDENTITY`.
+> If the grant ever gets confused after a signing change:
+> `tccutil reset Accessibility com.codeagency.unde` then relaunch.
 
 ---
 

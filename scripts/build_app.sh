@@ -21,8 +21,26 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/unde"
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
 
-echo "▸ code signing (ad-hoc)"
-codesign --force --sign - --options runtime --timestamp=none "$APP" 2>/dev/null || \
+# Sign with a STABLE identity so the Accessibility (TCC) grant survives rebuilds.
+# Ad-hoc signatures pin their designated requirement to the code hash, which
+# changes every build, so macOS drops the grant. A real certificate pins the
+# requirement to the cert instead — grant once, keep it.
+#
+# Identity resolution: $UNDE_SIGN_IDENTITY if set, else the first codesigning
+# identity in the keychain (Developer ID / Apple Development), else ad-hoc.
+IDENTITY="${UNDE_SIGN_IDENTITY:-}"
+if [ -z "$IDENTITY" ]; then
+  IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null | sed -n '1s/.*) \([0-9A-F]*\) .*/\1/p')"
+fi
+
+if [ -n "$IDENTITY" ]; then
+  NAME="$(security find-identity -v -p codesigning | sed -n "s/.*$IDENTITY \"\(.*\)\"/\1/p" | head -1)"
+  echo "▸ code signing with stable identity: ${NAME:-$IDENTITY}"
+  codesign --force --sign "$IDENTITY" "$APP"
+else
+  echo "▸ code signing (ad-hoc fallback — AX grant will not persist across rebuilds)"
   codesign --force --sign - "$APP"
+fi
 
 echo "✓ built $APP"
+codesign -dv "$APP" 2>&1 | grep -E "Authority|Identifier|Signature" | head -4 || true
