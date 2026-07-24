@@ -29,7 +29,11 @@ final class Preferences {
         static let launchAtLogin = "launchAtLogin"
         static let skipSecrets = "skipSecrets"
         static let showPreview = "showPreview"
+        static let uiScale = "uiScale"
     }
+
+    /// Bounds for the picker UI scale (Appearance pref). 1.0 is the design size.
+    static let uiScaleRange: ClosedRange<Double> = 0.8...1.5
 
     init() {
         defaults.register(defaults: [
@@ -38,6 +42,7 @@ final class Preferences {
             Key.restoreDelayMS: 500,
             Key.paused: false,
             Key.showPreview: true,
+            Key.uiScale: 1.0,
             Key.excludedBundleIDs: [
                 "com.apple.keychainaccess",
                 "com.agilebits.onepassword7",
@@ -87,6 +92,17 @@ final class Preferences {
     var showPreview: Bool {
         get { defaults.bool(forKey: Key.showPreview) }
         set { defaults.set(newValue, forKey: Key.showPreview) }
+    }
+
+    /// Uniform scale applied to the whole picker UI (Appearance pref). Clamped to
+    /// `uiScaleRange`; 1.0 is the design size.
+    var uiScale: Double {
+        get {
+            let v = defaults.double(forKey: Key.uiScale)
+            guard v > 0 else { return 1.0 }
+            return min(Self.uiScaleRange.upperBound, max(Self.uiScaleRange.lowerBound, v))
+        }
+        set { defaults.set(newValue, forKey: Key.uiScale) }
     }
 
     var excludedBundleIDs: Set<String> {

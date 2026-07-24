@@ -9,19 +9,18 @@ final class SettingsWindowController {
 
     private var window: NSWindow?
 
-    func show(prefs: Preferences, snippets: SnippetStore, history: HistoryStore, onHotKeyChange: @escaping (KeyCombo) -> Void) {
+    func show(prefs: Preferences, onHotKeyChange: @escaping (KeyCombo) -> Void) {
         if let window {
             NSApp.activate(ignoringOtherApps: true)
             window.makeKeyAndOrderFront(nil)
             return
         }
 
-        let root = SettingsView(prefs: prefs, snippets: snippets, history: history, onHotKeyChange: onHotKeyChange)
+        let root = SettingsView(prefs: prefs, onHotKeyChange: onHotKeyChange)
         let hosting = NSHostingController(rootView: root)
         let window = NSWindow(contentViewController: hosting)
         window.title = "unde Settings"
         window.styleMask = [.titled, .closable, .miniaturizable]
-        window.setContentSize(NSSize(width: 560, height: 460))
         window.isReleasedWhenClosed = false
         window.center()
         self.window = window

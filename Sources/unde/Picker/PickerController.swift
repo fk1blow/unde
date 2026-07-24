@@ -13,6 +13,7 @@ final class PickerController: NSObject, NSWindowDelegate {
     private let snippets: SnippetStore
     private let paster: Paster
     private let imageStore: ImageStore?
+    private let prefs: Preferences
 
     private let model = PickerModel()
     private let panel = PickerPanel()
@@ -24,11 +25,12 @@ final class PickerController: NSObject, NSWindowDelegate {
     private var isDismissing = false
     private var cancellables = Set<AnyCancellable>()
 
-    init(history: HistoryStore, snippets: SnippetStore, paster: Paster, imageStore: ImageStore? = nil) {
+    init(history: HistoryStore, snippets: SnippetStore, paster: Paster, prefs: Preferences, imageStore: ImageStore? = nil) {
         self.history = history
         self.snippets = snippets
         self.paster = paster
         self.imageStore = imageStore
+        self.prefs = prefs
         super.init()
 
         let view = PickerView(
@@ -74,12 +76,17 @@ final class PickerController: NSObject, NSWindowDelegate {
         model.query = ""
         model.selection = 0
         model.accessibilityTrusted = Permissions.isAccessibilityTrusted
+        model.showPreview = prefs.showPreview
+        model.uiScale = CGFloat(prefs.uiScale)
         rebuildRows()
 
         // Fixed, modest panel size — never asks SwiftUI for its size (whose
         // ScrollView fittingSize under-reported and produced an occasional
         // too-small panel). The list fills the space and scrolls for overflow.
-        let size = NSSize(width: Self.panelWidth, height: Self.panelHeight)
+        // Scaled by the Appearance UI-scale pref so the panel matches the scaled
+        // content the view renders.
+        let scale = model.uiScale
+        let size = NSSize(width: Self.panelWidth * scale, height: Self.panelHeight * scale)
         panel.setContentSize(size)
         positionPanel(size: size)
 
@@ -103,7 +110,7 @@ final class PickerController: NSObject, NSWindowDelegate {
     // clear, so the space to the right of the main card is invisible when no
     // preview is showing.
     static let panelWidth: CGFloat = PickerView.windowWidth
-    static let panelHeight: CGFloat = 420
+    static let panelHeight: CGFloat = PickerView.baseHeight
 
     private func positionPanel(size: NSSize) {
         let mouse = NSEvent.mouseLocation
@@ -111,7 +118,8 @@ final class PickerController: NSObject, NSWindowDelegate {
         guard let visible = screen?.visibleFrame else { return }
         // Centre the *main card* on screen (not the whole window), so the panel
         // sits where the user expects and the preview floats off to its right.
-        var x = visible.midX - PickerView.mainWidth / 2
+        // The main card's on-screen width scales with the UI-scale pref.
+        var x = visible.midX - (PickerView.mainWidth * model.uiScale) / 2
         // Keep the window fully on screen; if the preview would overflow the
         // right edge, slide the whole thing left rather than clip it.
         x = min(x, visible.maxX - size.width)
@@ -136,6 +144,7 @@ final class PickerController: NSObject, NSWindowDelegate {
                 id: "s-\(snippet.id.uuidString)",
                 kind: .pinned,
                 text: snippet.content.replacingOccurrences(of: "\n", with: "  "),
+                meta: nil,
                 slot: snippet.slot,
                 image: nil,
                 snippet: snippet,
@@ -162,6 +171,7 @@ final class PickerController: NSObject, NSWindowDelegate {
                 id: "c-\(item.id)",
                 kind: .clip,
                 text: item.rowLabel,
+                meta: item.rowMeta,
                 slot: nil,
                 image: item.resolvedImage(using: imageStore),
                 snippet: nil,
@@ -202,7 +212,7 @@ final class PickerController: NSObject, NSWindowDelegate {
         guard let snippet = snippets.snippet(forSlot: slot) else { return }
         let row = DisplayRow(
             id: "s-\(snippet.id.uuidString)", kind: .pinned, text: snippet.content,
-            slot: slot, image: nil, snippet: snippet, clip: nil
+            meta: nil, slot: slot, image: nil, snippet: snippet, clip: nil
         )
         performPaste(row: row, mode: .pasteInPlace)
     }
@@ -298,6 +308,7 @@ final class PickerController: NSObject, NSWindowDelegate {
         let cmd = flags.contains(.command)
         let ctrl = flags.contains(.control)
         let shift = flags.contains(.shift)
+        let option = flags.contains(.option)
         let code = Int(event.keyCode)
         let chars = event.charactersIgnoringModifiers ?? ""
 
@@ -332,8 +343,8 @@ final class PickerController: NSObject, NSWindowDelegate {
         case kVK_UpArrow:
             move(-1); return true
         case kVK_Delete: // backspace edits the query
-            if ctrl {
-                // ⌃⌫ deletes the previous word of the query.
+            if option {
+                // ⌥⌫ deletes the previous word of the query (macOS convention).
                 deleteWordFromQuery()
             } else if !model.query.isEmpty {
                 model.query.removeLast()

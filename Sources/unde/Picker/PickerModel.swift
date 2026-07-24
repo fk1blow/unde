@@ -9,6 +9,7 @@ struct DisplayRow: Identifiable {
     let id: String
     let kind: Kind
     let text: String         // the single line shown: exactly what gets pasted
+    let meta: String?        // faded, secondary detail shown after `text`
     let slot: Int?           // pinned slot for the ⌘n badge
     let image: NSImage?      // clip thumbnail
 
@@ -32,6 +33,15 @@ final class PickerModel: ObservableObject {
     @Published var pinnedRows: [DisplayRow] = []
     @Published var clipRows: [DisplayRow] = []
     @Published var accessibilityTrusted: Bool = true
+
+    /// Whether the detached preview card is allowed to appear (SET pref). When
+    /// false, the picker is just the main card regardless of the selection type.
+    @Published var showPreview: Bool = true
+
+    /// Uniform scale for the whole picker UI (Appearance pref). 1.0 is the design
+    /// size; the view applies it via `scaleEffect` and the controller sizes the
+    /// panel to match.
+    @Published var uiScale: CGFloat = 1.0
 
     /// Set true when a selection change comes from the mouse hovering a row, so
     /// the list does not auto-scroll to re-center under the pointer. Consumed and

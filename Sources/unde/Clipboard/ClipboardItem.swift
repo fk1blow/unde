@@ -45,23 +45,28 @@ struct ClipboardItem: Identifiable, Equatable {
         }
     }
 
-    /// The single-line label shown in a picker row. Text items show their
+    /// The primary single-line label shown in a picker row. Text items show their
     /// preview; images have no filename (they're stored under a content hash), so
-    /// describe them by dimensions and size instead of a bare "Image".
+    /// the primary label is just "Image" with the details carried in `rowMeta`.
     var rowLabel: String {
         switch kind {
-        case .text:
-            return preview
-        case .image:
-            var parts: [String] = []
-            if let w = imageWidth, let h = imageHeight, w > 0, h > 0 {
-                parts.append("\(w) × \(h)")
-            }
-            if byteSize > 0 {
-                parts.append(Self.formattedByteSize(byteSize))
-            }
-            return parts.isEmpty ? "Image" : "Image  ·  " + parts.joined(separator: "  ·  ")
+        case .text:  return preview
+        case .image: return "Image"
         }
+    }
+
+    /// Faded, secondary metadata shown after `rowLabel` — dimensions and size for
+    /// images, nil for text.
+    var rowMeta: String? {
+        guard kind == .image else { return nil }
+        var parts: [String] = []
+        if let w = imageWidth, let h = imageHeight, w > 0, h > 0 {
+            parts.append("\(w) × \(h)")
+        }
+        if byteSize > 0 {
+            parts.append(Self.formattedByteSize(byteSize))
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     static func formattedByteSize(_ bytes: Int) -> String {

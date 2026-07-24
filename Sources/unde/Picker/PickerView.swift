@@ -25,17 +25,27 @@ struct PickerView: View {
     static let previewWidth: CGFloat = 300
     static let cardGap: CGFloat = 18
     static let windowWidth: CGFloat = mainWidth + cardGap + previewWidth
+    /// The design-size height of the picker content, before UI scaling. The panel
+    /// is sized to this × `uiScale` by `PickerController`.
+    static let baseHeight: CGFloat = 420
 
     var body: some View {
         HStack(alignment: .top, spacing: Self.cardGap) {
             mainCard
-                .frame(width: Self.mainWidth)
+                .frame(width: Self.mainWidth, height: Self.baseHeight)
             if let kind = previewKind {
                 previewCard(kind)
                     .frame(width: Self.previewWidth)
             }
         }
-        .frame(width: Self.windowWidth, alignment: .topLeading)
+        .frame(width: Self.windowWidth, height: Self.baseHeight, alignment: .topLeading)
+        // Uniform UI scale: lay the whole thing out at design size, scale it from
+        // the top-left, then claim the scaled footprint so the hosting view (and
+        // the panel it fills) match exactly.
+        .scaleEffect(model.uiScale, anchor: .topLeading)
+        .frame(width: Self.windowWidth * model.uiScale,
+               height: Self.baseHeight * model.uiScale,
+               alignment: .topLeading)
     }
 
     /// The main panel: search row, the results list, and the footer of hints.
@@ -126,9 +136,10 @@ struct PickerView: View {
                 let rows = model.allRows
                 guard newValue >= 0, newValue < rows.count else { return }
                 let targetID = rows[newValue].id
-                withAnimation(.easeOut(duration: 0.08)) {
-                    proxy.scrollTo(targetID, anchor: .center)
-                }
+                // anchor: nil scrolls the *minimum* amount to keep the row on
+                // screen — a fixed anchor re-centers on every keypress and makes
+                // the list lurch. No animation, so stepping feels immediate.
+                proxy.scrollTo(targetID, anchor: nil)
             }
         }
     }
@@ -139,7 +150,6 @@ struct PickerView: View {
     /// means no preview — a single-line snippet that already fits in its row
     /// tells you everything, so we don't float an extra card for it.
     private enum PreviewKind {
-        case color(String)   // a hex string like "#FF00FF"
         case image(DisplayRow)
         case text(String)    // multi-line or long-enough-to-be-truncated text
     }
@@ -149,10 +159,11 @@ struct PickerView: View {
     private static let truncationThreshold = 58
 
     private var previewKind: PreviewKind? {
-        guard let row = model.selectedRow else { return nil }
+        guard model.showPreview, let row = model.selectedRow else { return nil }
         if row.image != nil { return .image(row) }
+        // Colours already show a swatch in their row, so they get no preview card.
         let full = row.fullText
-        if let hex = Self.hexColor(full) { return .color(hex) }
+        if Self.hexColor(full) != nil { return nil }
         if full.contains("\n") || full.count > Self.truncationThreshold { return .text(full) }
         return nil
     }
@@ -180,11 +191,6 @@ struct PickerView: View {
     @ViewBuilder
     private func previewBody(_ kind: PreviewKind) -> some View {
         switch kind {
-        case .color(let hex):
-            // Just the swatch — the hex value is already shown in the row.
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color(hexString: hex) ?? .clear)
-                .frame(width: Self.previewContentWidth, height: 150)
         case .image(let row):
             // Just the image, sized to an exact fit box so the card hugs it — no
             // dimensions caption (that's in the row).
@@ -250,15 +256,23 @@ struct PickerView: View {
     private func rowView(_ row: DisplayRow, index: Int) -> some View {
         let active = index == model.selection
         return HStack(spacing: 11) {
-            Text(row.text)
-                .font(.system(size: 14))
-                .foregroundColor(Theme.text)
-                .lineLimit(1)
-                .truncationMode(.tail)
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(row.text)
+                    .font(.system(size: 14))
+                    .foregroundColor(Theme.text)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                if let meta = row.meta {
+                    Text(meta)
+                        .font(.system(size: 12.5))
+                        .foregroundColor(Theme.neutral600)
+                        .lineLimit(1)
+                }
+            }
             if let hex = Self.hexColor(row.fullText), let color = Color(hexString: hex) {
-                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
                     .fill(color)
-                    .frame(width: 22, height: 22)
+                    .frame(width: 14, height: 14)
             }
             Spacer(minLength: 6)
             if let slot = row.slot {

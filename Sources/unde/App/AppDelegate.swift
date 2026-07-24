@@ -43,7 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // The picker panel and its whole view hierarchy are built now and only
         // ever hidden/shown afterwards — never reconstructed (perf budget).
-        picker = PickerController(history: history, snippets: snippetStore, paster: paster, imageStore: imageStore)
+        picker = PickerController(history: history, snippets: snippetStore, paster: paster, prefs: prefs, imageStore: imageStore)
 
         // Menu bar item — the only persistent UI.
         menu = MenuBarController(prefs: prefs, monitor: monitor, paster: paster) { [weak self] in
@@ -90,8 +90,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func openSettings() {
         SettingsWindowController.shared.show(
             prefs: prefs,
-            snippets: snippetStore,
-            history: history,
             onHotKeyChange: { [weak self] combo in self?.updateHotKey(combo) }
         )
     }
