@@ -19,6 +19,12 @@ final class PickerController: NSObject, NSWindowDelegate {
     private let panel = PickerPanel()
     private var hostingView: NSHostingView<PickerView>!
 
+    // The preview lives in its own panel to the right of the main card. Keeping it
+    // separate means a shrinking or vanishing preview clears its own window backing
+    // (resize/orderOut) instead of ghosting a stale raster on the main panel.
+    private let previewPanel = PickerPanel(acceptsKey: false)
+    private var previewHostingView: NSHostingView<PickerView>!
+
     private var eventMonitor: Any?
     private var previousApp: NSRunningApplication?
     private var isVisible = false
@@ -39,14 +45,30 @@ final class PickerController: NSObject, NSWindowDelegate {
             onHoverRow: { [weak self] index in
                 guard let self else { return }
                 // Hover-driven selection: highlight the row but don't scroll the
-                // list under the pointer.
+                // list under the pointer. A hover collapses any keyboard-built
+                // range back to the single hovered row.
                 self.model.suppressAutoScroll = true
                 self.model.selection = index
+                self.model.anchor = index
             }
         )
         hostingView = NSHostingView(rootView: view)
         panel.contentView = hostingView
         panel.delegate = self
+
+        // The preview panel renders the same model through the `.preview` surface.
+        // The surface reports its natural size back through `onPreviewSize`, driven
+        // by SwiftUI layout, so the panel resizes in lockstep with the content it
+        // renders — never lagging a selection behind (which showed a stale preview
+        // or clipped taller content into a too-small panel).
+        let previewView = PickerView(
+            model: model,
+            surface: .preview,
+            onPreviewSize: { [weak self] size in self?.applyPreviewSize(size) }
+        )
+        previewHostingView = NSHostingView(rootView: previewView)
+        previewPanel.contentView = previewHostingView
+        previewPanel.ignoresMouseEvents = true
 
         // Live-refresh the list while the picker is open, so a copy made with the
         // panel up (or a just-captured item) appears immediately.
@@ -75,9 +97,12 @@ final class PickerController: NSObject, NSWindowDelegate {
 
         model.query = ""
         model.selection = 0
+        model.anchor = 0
         model.accessibilityTrusted = Permissions.isAccessibilityTrusted
         model.showPreview = prefs.showPreview
         model.uiScale = CGFloat(prefs.uiScale)
+        // Force the preview surface to re-measure for this open (re-fires onAppear).
+        model.previewGeneration &+= 1
         rebuildRows()
 
         // Fixed, modest panel size — never asks SwiftUI for its size (whose
@@ -94,22 +119,68 @@ final class PickerController: NSObject, NSWindowDelegate {
         panel.makeKey()
         installEventMonitor()
         isVisible = true
+
+        // Order the preview panel in above the main card so its hosting view lays
+        // out and reports a size. It stays transparent until `applyPreviewSize`
+        // gives it real content, so there's no stale flash while SwiftUI renders
+        // the first selection. It never becomes key (canBecomeKey == false), so it
+        // can't steal focus and dismiss the picker.
+        previewPanel.alphaValue = 0
+        previewPanel.order(.above, relativeTo: panel.windowNumber)
     }
 
     func hide() {
         guard isVisible else { return }
         isDismissing = true
         removeEventMonitor()
+        previewPanel.orderOut(nil)
         panel.orderOut(nil)
         isVisible = false
         isDismissing = false
     }
 
-    // Fixed panel size — modest, consistent on every open. The window spans the
-    // main card plus the detached preview card and gap; the window background is
-    // clear, so the space to the right of the main card is invisible when no
-    // preview is showing.
-    static let panelWidth: CGFloat = PickerView.windowWidth
+    // MARK: Preview panel
+
+    /// Size, position and show/hide the detached preview panel to match the current
+    /// selection. Called by the `.preview` surface's `onPreviewSize` callback as
+    /// SwiftUI lays the content out, so `designSize` is always the size of what's
+    /// *currently* rendered — never a selection behind (the stale/clipping bug).
+    ///
+    /// `designSize` is the unscaled (design) size — the surface reports it before
+    /// its `scaleEffect`, so we multiply by the UI scale here.
+    private func applyPreviewSize(_ designSize: CGSize) {
+        guard isVisible, model.showPreview, designSize.height > 4 else {
+            // A near-zero height is the "no preview" sentinel (Color.clear 1×1);
+            // keep the panel ordered-in but transparent so it keeps laying out
+            // (and reporting sizes) for the next selection.
+            previewPanel.alphaValue = 0
+            return
+        }
+        let scale = model.uiScale
+        let size = NSSize(width: (PickerView.previewWidth * scale).rounded(),
+                          height: (designSize.height * scale).rounded())
+        previewPanel.setContentSize(size)
+        positionPreviewPanel(size: size)
+        previewPanel.alphaValue = 1
+    }
+
+    /// Place the preview panel to the right of the main panel, top-aligned; if it
+    /// would run off the screen's right edge, place it to the left instead.
+    private func positionPreviewPanel(size: NSSize) {
+        let main = panel.frame
+        let gap = PickerView.cardGap * model.uiScale
+        var x = main.maxX + gap
+        let y = main.maxY - size.height
+        let screen = NSScreen.screens.first { $0.frame.contains(NSPoint(x: main.midX, y: main.midY)) } ?? NSScreen.main
+        if let visible = screen?.visibleFrame, x + size.width > visible.maxX {
+            x = main.minX - gap - size.width
+        }
+        previewPanel.setFrameOrigin(NSPoint(x: x.rounded(), y: y.rounded()))
+    }
+
+    // Fixed main-panel size — modest, consistent on every open. The panel holds
+    // only the main card now; the preview floats in its own panel to the right.
+    static let panelWidth: CGFloat = PickerView.mainWidth
     static let panelHeight: CGFloat = PickerView.baseHeight
 
     private func positionPanel(size: NSSize) {
@@ -169,14 +240,21 @@ final class PickerController: NSObject, NSWindowDelegate {
                 .map { $0.0 }
         }
 
-        let clips = clipItems.map { item in
-            DisplayRow(
+        let clips = clipItems.map { item -> DisplayRow in
+            // Files carry a small Finder icon (leading glyph) but no `image`, so
+            // they never trigger the image preview card. Images keep their
+            // thumbnail in `image`.
+            let icon: NSImage? = item.kind == .file
+                ? item.filePath.map { Self.fileIcon(for: $0) }
+                : nil
+            return DisplayRow(
                 id: "c-\(item.id)",
                 kind: .clip,
                 text: item.rowLabel,
                 meta: item.rowMeta,
                 slot: nil,
-                image: item.resolvedImage(using: imageStore),
+                image: item.kind == .file ? nil : item.resolvedImage(using: imageStore),
+                icon: icon,
                 snippet: nil,
                 clip: item
             )
@@ -184,9 +262,18 @@ final class PickerController: NSObject, NSWindowDelegate {
 
         model.pinnedRows = pinned
         model.clipRows = clips
-        if model.selection >= model.count {
-            model.selection = max(0, model.count - 1)
-        }
+        let last = max(0, model.count - 1)
+        if model.selection >= model.count { model.selection = last }
+        if model.anchor >= model.count { model.anchor = last }
+        // The preview resizes itself: the `.preview` surface re-renders whenever the
+        // rows or selection change and reports its new size through `applyPreviewSize`.
+    }
+
+    /// A small Finder icon for a file path, sized for a row's leading glyph.
+    private static func fileIcon(for path: String) -> NSImage {
+        let icon = NSWorkspace.shared.icon(forFile: path)
+        icon.size = NSSize(width: 16, height: 16)
+        return icon
     }
 
     // MARK: Selection
@@ -197,18 +284,35 @@ final class PickerController: NSObject, NSWindowDelegate {
         // Keyboard navigation should scroll the selection into view.
         model.suppressAutoScroll = false
         model.selection = (model.selection + delta + n) % n
+        // A plain arrow collapses any multi-selection back to a single row.
+        model.anchor = model.selection
+    }
+
+    /// Shift+arrow: move the focus while leaving the anchor fixed, growing or
+    /// shrinking the selected range. Unlike `move`, this clamps at the ends rather
+    /// than wrapping — extending a selection past the list edge makes no sense.
+    private func extend(_ delta: Int) {
+        let n = model.count
+        guard n > 0 else { return }
+        let next = model.selection + delta
+        guard next >= 0, next < n else { return }
+        model.suppressAutoScroll = false
+        model.selection = next
     }
 
     // MARK: Commit / paste
 
-    private func commit(at index: Int, mode: Paster.PasteMode) {
+    private func commit(at index: Int, mode: Paster.PasteMode, asPath: Bool = false) {
         let rows = model.allRows
         guard index >= 0, index < rows.count else { return }
-        performPaste(row: rows[index], mode: mode)
+        performPaste(row: rows[index], mode: mode, asPath: asPath)
     }
 
-    private func commitSelected(mode: Paster.PasteMode) {
-        commit(at: model.selection, mode: mode)
+    private func commitSelected(mode: Paster.PasteMode, asPath: Bool = false) {
+        // A multi-row selection is for deletion only — pasting a range makes no
+        // sense, so Enter is a no-op until the selection is narrowed to one row.
+        guard !model.isMultiSelecting else { return }
+        commit(at: model.selection, mode: mode, asPath: asPath)
     }
 
     /// ⌘n pastes the n-th pinned snippet by display order, matching the ⌘n badge
@@ -224,11 +328,24 @@ final class PickerController: NSObject, NSWindowDelegate {
         performPaste(row: row, mode: .pasteInPlace)
     }
 
-    private func performPaste(row: DisplayRow, mode: Paster.PasteMode) {
+    private func performPaste(row: DisplayRow, mode: Paster.PasteMode, asPath: Bool = false) {
         let app = previousApp
         let outcome: Paster.Outcome
 
-        if let snippet = row.snippet {
+        if let clip = row.clip, clip.kind == .file, let path = clip.filePath {
+            // Files: ⌥⏎ (asPath) or the "Keep its path" mode pastes the path as
+            // text; otherwise paste the actual file. A reference can dangle, so
+            // check existence first and surface a notice rather than paste nothing.
+            hide()
+            if asPath || prefs.fileCaptureMode == .keepPath {
+                outcome = paster.paste(text: path, previousApp: app, mode: mode)
+            } else if FileManager.default.fileExists(atPath: path) {
+                outcome = paster.paste(fileURL: URL(fileURLWithPath: path), previousApp: app, mode: mode)
+            } else {
+                NoticePresenter.shared.show("That file has moved or was deleted. Its path is still available with ⌥⏎.")
+                return
+            }
+        } else if let snippet = row.snippet {
             hide()
             outcome = paster.paste(text: snippet.content, previousApp: app, mode: mode)
         } else if let text = row.clip?.text {
@@ -263,6 +380,7 @@ final class PickerController: NSObject, NSWindowDelegate {
         while let last = q.last, last != " " { q.removeLast() }
         model.query = q
         model.selection = 0
+        model.anchor = 0
         rebuildRows()
     }
 
@@ -279,21 +397,42 @@ final class PickerController: NSObject, NSWindowDelegate {
         NoticePresenter.shared.show("Pinned to snippets")
     }
 
+    /// ⌘Delete removes the selected row(s). With a single selection this is one
+    /// history item or pinned snippet (PRV-3); with a Shift-extended range it
+    /// removes every row in the range at once. Freed snippet slots (1–9) become
+    /// available again for the next promote; nothing is renumbered.
     private func deleteSelected() {
         let rows = model.allRows
-        guard model.selection < rows.count else { return }
-        let row = rows[model.selection]
-        if let clip = row.clip {
-            // ⌘Delete removes a history item (PRV-3).
-            history.remove(id: clip.id)
-            rebuildRows()
-        } else if let snippet = row.snippet {
-            // ⌘Delete also removes a pinned snippet, immediately — the same
-            // delete the Settings pane performs. The freed slot (1–9) becomes
-            // available again for the next promote; nothing is renumbered.
-            snippets.delete(id: snippet.id)
-            rebuildRows()
+        guard !rows.isEmpty else { return }
+        let range = model.selectionRange.clamped(to: rows.indices.lowerBound...(rows.count - 1))
+
+        // Gather the ids to delete before touching any store, so removals don't
+        // shift the indices out from under us.
+        var clipIDs = Set<String>()
+        var snippetIDs = [UUID]()
+        for i in range {
+            let row = rows[i]
+            if let clip = row.clip { clipIDs.insert(clip.id) }
+            else if let snippet = row.snippet { snippetIDs.append(snippet.id) }
         }
+
+        history.remove(ids: clipIDs)
+        snippetIDs.forEach { snippets.delete(id: $0) }
+
+        // Collapse to a single selection at the range's start; rebuildRows clamps
+        // it if it now sits past the end of the shortened list.
+        let landing = range.lowerBound
+        model.selection = landing
+        model.anchor = landing
+        rebuildRows()
+    }
+
+    /// ⌘R reveals the selected file in Finder. No-op for non-file rows.
+    private func revealSelectedInFinder() {
+        let rows = model.allRows
+        guard model.selection < rows.count, let path = rows[model.selection].filePath else { return }
+        hide()
+        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
     }
 
     // MARK: Keyboard
@@ -326,6 +465,7 @@ final class PickerController: NSObject, NSWindowDelegate {
         if cmd {
             if let n = Int(chars), (1...9).contains(n) { pastePinnedSlot(n); return true }
             if chars == "p" { promoteSelected(); return true }
+            if chars == "r" { revealSelectedInFinder(); return true }
             if code == kVK_Delete {
                 // While searching, ⌘⌫ clears the query to the start (standard
                 // "delete to beginning of line"). With no query it falls back to
@@ -335,6 +475,7 @@ final class PickerController: NSObject, NSWindowDelegate {
                 } else {
                     model.query = ""
                     model.selection = 0
+                    model.anchor = 0
                     rebuildRows()
                 }
                 return true
@@ -347,11 +488,18 @@ final class PickerController: NSObject, NSWindowDelegate {
         case kVK_Escape:
             hide(); return true
         case kVK_Return, kVK_ANSI_KeypadEnter:
-            commitSelected(mode: shift ? .pasteAsPlainText : .pasteInPlace); return true
+            if option {
+                // ⌥⏎ pastes a file's path as text (harmless for non-file rows,
+                // which have no path and fall back to a normal paste).
+                commitSelected(mode: .pasteInPlace, asPath: true)
+            } else {
+                commitSelected(mode: shift ? .pasteAsPlainText : .pasteInPlace)
+            }
+            return true
         case kVK_DownArrow:
-            move(1); return true
+            shift ? extend(1) : move(1); return true
         case kVK_UpArrow:
-            move(-1); return true
+            shift ? extend(-1) : move(-1); return true
         case kVK_Delete: // backspace edits the query
             if option {
                 // ⌥⌫ deletes the previous word of the query (macOS convention).
@@ -378,6 +526,7 @@ final class PickerController: NSObject, NSWindowDelegate {
            !CharacterSet.controlCharacters.contains(first) {
             model.query.append(scalars)
             model.selection = 0
+            model.anchor = 0
             rebuildRows()
             return true
         }

@@ -13,6 +13,7 @@ struct SettingsView: View {
     @State private var combo: KeyCombo
     @State private var recording = false
     @State private var uiScale: Double
+    @State private var fileMode: FileCaptureMode
     private var recorderMonitor = RecorderMonitor()
 
     init(prefs: Preferences, onHotKeyChange: @escaping (KeyCombo) -> Void) {
@@ -21,6 +22,7 @@ struct SettingsView: View {
         _showPreview = State(initialValue: prefs.showPreview)
         _combo = State(initialValue: prefs.hotKeyCombo)
         _uiScale = State(initialValue: prefs.uiScale)
+        _fileMode = State(initialValue: prefs.fileCaptureMode)
     }
 
     var body: some View {
@@ -38,6 +40,15 @@ struct SettingsView: View {
                     }
                     .frame(minWidth: 110)
                 }
+            }
+
+            Section("Clipboard") {
+                Picker("When you copy a file", selection: $fileMode) {
+                    Text("Keep the file").tag(FileCaptureMode.keepFile)
+                    Text("Keep its path").tag(FileCaptureMode.keepPath)
+                    Text("Ignore").tag(FileCaptureMode.ignore)
+                }
+                .onChange(of: fileMode) { prefs.fileCaptureMode = $0 }
             }
 
             Section("Appearance") {

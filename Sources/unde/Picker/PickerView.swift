@@ -5,18 +5,35 @@ import SwiftUI
 /// section, and a footer of keyboard hints. Purely a view — all keyboard input
 /// and selection is handled by `PickerController`.
 struct PickerView: View {
+    /// Which of the two picker windows this view fills. The main card and the
+    /// detached preview card live in *separate* panels: rendering the resizing
+    /// preview in the main panel left stale image/SVG rasters ghosting in the
+    /// transparent backing when the preview shrank. A dedicated panel is resized
+    /// (and hidden) per selection, so its backing is cleared naturally.
+    enum Surface { case main, preview }
+
     @ObservedObject var model: PickerModel
 
-    /// Called when a row is clicked, with its global index.
-    var onClickRow: (Int) -> Void
-    /// Called when the pointer enters a row, with its global index.
-    var onHoverRow: (Int) -> Void
+    /// Which window this instance renders. Defaults to the main card.
+    var surface: Surface = .main
 
-    /// Measured natural height of the text preview, so its card hugs the content
-    /// instead of standing at a fixed box height.
-    @State private var textPreviewHeight: CGFloat = 0
-    /// Past this the text preview stops growing and scrolls instead.
-    private static let textPreviewMaxHeight: CGFloat = 320
+    /// Called when a row is clicked, with its global index. (Main surface only.)
+    var onClickRow: (Int) -> Void = { _ in }
+    /// Called when the pointer enters a row, with its global index. (Main only.)
+    var onHoverRow: (Int) -> Void = { _ in }
+    /// Reports the preview content's natural (unscaled) size whenever it changes,
+    /// so the controller can size the detached panel to hug it exactly. Driven by
+    /// SwiftUI layout, so it is never stale. (Preview surface only.)
+    var onPreviewSize: (CGSize) -> Void = { _ in }
+
+    /// The last measured design (unscaled) size of the preview content, used to
+    /// reclaim the scaled footprint so the surface's layout size matches the
+    /// design×scale panel. (Preview surface only.)
+    @State private var previewDesignSize: CGSize = CGSize(width: PickerView.previewWidth, height: 1)
+
+    /// Past this many lines the text preview truncates rather than growing the
+    /// card unbounded.
+    private static let textPreviewMaxLines = 16
 
     /// Scroll-target ids for the section headers, so selecting the first row of a
     /// section can reveal its label rather than clip it at the top.
@@ -35,22 +52,62 @@ struct PickerView: View {
     static let baseHeight: CGFloat = 420
 
     var body: some View {
-        HStack(alignment: .top, spacing: Self.cardGap) {
-            mainCard
-                .frame(width: Self.mainWidth, height: Self.baseHeight)
+        switch surface {
+        case .main:    mainSurface
+        case .preview: previewSurface
+        }
+    }
+
+    /// The main panel: the fixed-size card, scaled by the UI-scale pref.
+    private var mainSurface: some View {
+        mainCard
+            .frame(width: Self.mainWidth, height: Self.baseHeight)
+            .scaleEffect(model.uiScale, anchor: .topLeading)
+            .frame(width: Self.mainWidth * model.uiScale,
+                   height: Self.baseHeight * model.uiScale,
+                   alignment: .topLeading)
+    }
+
+    /// The detached preview panel: the card hugging its content, or nothing when
+    /// the selection has no preview. Its own panel is sized to this by the
+    /// controller (reading `fittingSize`), so `scaleEffect` here is deliberately
+    /// left out of the layout size — the controller multiplies by the UI scale.
+    @ViewBuilder
+    private var previewSurface: some View {
+        Group {
             if let kind = previewKind {
                 previewCard(kind)
                     .frame(width: Self.previewWidth)
+            } else {
+                // A near-zero footprint so the controller reads "no preview" from
+                // the reported size and hides the panel.
+                Color.clear.frame(width: 1, height: 1)
             }
         }
-        .frame(width: Self.windowWidth, height: Self.baseHeight, alignment: .topLeading)
-        // Uniform UI scale: lay the whole thing out at design size, scale it from
-        // the top-left, then claim the scaled footprint so the hosting view (and
-        // the panel it fills) match exactly.
+        .fixedSize(horizontal: false, vertical: true)
+        // Measure the laid-out (design) size *before* the scaleEffect. This drives
+        // both the panel size (via `onPreviewSize`) and the reframe below, so all
+        // three — content, hosting view, panel — agree. `onPreferenceChange` is the
+        // reliable trigger (fires on every change of the reduced value, grow or
+        // shrink). Keyed on `previewGeneration` so re-opening re-reports.
+        .background(
+            GeometryReader { geo in
+                Color.clear.preference(key: PreviewSizeKey.self, value: geo.size)
+            }
+        )
         .scaleEffect(model.uiScale, anchor: .topLeading)
-        .frame(width: Self.windowWidth * model.uiScale,
-               height: Self.baseHeight * model.uiScale,
+        // Reclaim the *scaled* footprint (mirrors `mainSurface`). Without this the
+        // content lays out at design size while the panel is design×scale, so at
+        // scale ≠ 1 the scaled content is centred and its right/bottom edges — and
+        // their borders — spill past the panel and get clipped.
+        .frame(width: previewDesignSize.width * model.uiScale,
+               height: previewDesignSize.height * model.uiScale,
                alignment: .topLeading)
+        .onPreferenceChange(PreviewSizeKey.self) { size in
+            previewDesignSize = size
+            onPreviewSize(size)
+        }
+        .id(model.previewGeneration)
     }
 
     /// The main panel: search row, the results list, and the footer of hints.
@@ -180,6 +237,8 @@ struct PickerView: View {
 
     private var previewKind: PreviewKind? {
         guard model.showPreview, let row = model.selectedRow else { return nil }
+        // Files show name + path in the row itself; no detached preview card.
+        if row.isFile { return nil }
         if row.image != nil { return .image(row) }
         // Colours already show a swatch in their row, so they get no preview card.
         let full = row.fullText
@@ -267,20 +326,29 @@ struct PickerView: View {
                 .aspectRatio(contentMode: .fit)
                 .frame(width: size.width, height: size.height)
         case .text(let full):
-            ScrollView {
-                Text(full)
-                    .font(.system(size: 13))
-                    .foregroundColor(Theme.text)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(GeometryReader { geo in
-                        Color.clear.preference(key: TextHeightKey.self, value: geo.size.height)
-                    })
-            }
-            // Hug the measured text height, capping (and scrolling) past the max.
-            .frame(height: min(max(textPreviewHeight, 1), Self.textPreviewMaxHeight))
-            .onPreferenceChange(TextHeightKey.self) { textPreviewHeight = $0 }
+            // Cap the text to a fixed number of *source* lines in Swift rather than
+            // with `.lineLimit`: a lineLimit-truncated Text combined with `.fixedSize`
+            // under-reports its own height by roughly half a line, so the card was
+            // sized just short of what it draws and clipped the last line. Capping
+            // the string means the Text lays out all of its (≤ cap) lines with no
+            // truncation, so its measured height matches what's drawn exactly.
+            // No .textSelection: the panel dismisses on focus loss so a selection
+            // isn't usable, and macOS's selection highlight (the system accent)
+            // otherwise paints a coloured box over the text.
+            Text(Self.cappedLines(full, max: Self.textPreviewMaxLines))
+                .font(.system(size: 13))
+                .foregroundColor(Theme.text)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    /// Truncate `text` to at most `max` lines, appending an ellipsis line when it
+    /// was cut, so the preview caps its height without relying on `.lineLimit`.
+    private static func cappedLines(_ text: String, max: Int) -> String {
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        guard lines.count > max else { return text }
+        return lines.prefix(max).joined(separator: "\n") + "\n…"
     }
 
     /// The exact display size for an image preview: scaled to fit the content
@@ -321,9 +389,13 @@ struct PickerView: View {
     }
 
     private func rowView(_ row: DisplayRow, index: Int) -> some View {
-        let active = index == model.selection
+        let active = model.isSelected(index)
+        // The ⏎ chevron advertises paste, which is disabled while a multi-row
+        // range is selected — so only show it in single-select mode.
+        let showPaste = active && !model.isMultiSelecting
         let swatch = Self.hexColor(row.fullText).flatMap { Color(hexString: $0) }
-        return PickerRow(text: row.text, meta: row.meta, colorSwatch: swatch, slot: row.slot, active: active)
+        return PickerRow(text: row.text, meta: row.meta, colorSwatch: swatch, slot: row.slot, icon: row.icon,
+                         active: active, showPaste: showPaste)
             .contentShape(Rectangle())
             .onTapGesture { onClickRow(index) }
             .onHover { if $0 { onHoverRow(index) } }
@@ -333,15 +405,29 @@ struct PickerView: View {
 
     private var footer: some View {
         HStack(spacing: 13) {
+            // The default verbs always show in these fixed positions, so the
+            // footer doesn't reflow as the selection changes.
             hint("⏎", "paste")
             hint("⌘P", "pin")
             hint("⌘⌫", "delete")
             hint("⌘1–9", "jump")
+            // Selection-specific verbs append at the tail as accent chips so they
+            // read as extra, contextual actions for this row — distinct from the
+            // always-on hints. File rows are the only case today, and they don't
+            // apply to a multi-row selection.
+            if !model.isMultiSelecting, model.selectedRow?.isFile == true {
+                actionChip("⌥⏎", "paste path")
+                actionChip("⌘R", "reveal")
+            }
             Spacer()
             Text(model.countLabel)
                 .font(.system(size: 11))
                 .foregroundColor(Theme.neutral500)
         }
+        // Fixed content height so the chips' padding never makes the footer taller
+        // than the plain-text hints — otherwise landing on a file row nudges the
+        // whole layout vertically.
+        .frame(height: 20)
         .padding(.horizontal, 18)
         .padding(.vertical, 14)
     }
@@ -356,13 +442,37 @@ struct PickerView: View {
                 .foregroundColor(Theme.neutral600)
         }
     }
+
+    /// A contextual action rendered as an accent-tinted chip (no border), so
+    /// actions specific to the current selection stand out from the muted,
+    /// always-on hints.
+    private func actionChip(_ key: String, _ label: String) -> some View {
+        HStack(spacing: 5) {
+            Text(key)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(Theme.accent300)
+            Text(label)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(Theme.accent300.opacity(0.9))
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 2.5)
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(Theme.accent.opacity(0.18))
+        )
+    }
 }
 
-/// Reports the natural height of the text preview's content up the view tree.
-private struct TextHeightKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
+/// Carries the preview surface's laid-out (design) size up to the controller, so
+/// the detached panel can be resized to hug it. `onPreferenceChange` fires on
+/// every change of the reduced value, which is the reliable way to catch the
+/// preview both growing and shrinking as the selection moves.
+private struct PreviewSizeKey: PreferenceKey {
+    static var defaultValue: CGSize = .zero
+    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
+        let next = nextValue()
+        if next != .zero { value = next }
     }
 }
 
@@ -377,11 +487,22 @@ struct PickerRow: View {
     var meta: String? = nil
     var colorSwatch: Color? = nil
     var slot: Int? = nil
+    var icon: NSImage? = nil
     let active: Bool
+    /// Whether to show the ⏎ paste chevron. Defaults to `active` so existing
+    /// call sites (e.g. the Settings preview) are unchanged; the picker passes
+    /// `false` for rows in a multi-select range, where paste is disabled.
+    var showPaste: Bool? = nil
 
     var body: some View {
         HStack(spacing: 11) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
+                if let icon {
+                    Image(nsImage: icon)
+                        .resizable()
+                        .frame(width: 16, height: 16)
+                        .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 2 }
+                }
                 Text(text)
                     .font(.system(size: 14))
                     .foregroundColor(Theme.text)
@@ -406,7 +527,7 @@ struct PickerRow: View {
             Text("⏎")
                 .font(.system(size: 13))
                 .foregroundColor(Theme.accent300)
-                .opacity(active ? 1 : 0)
+                .opacity((showPaste ?? active) ? 1 : 0)
         }
         .padding(.horizontal, 11)
         .padding(.vertical, 9)

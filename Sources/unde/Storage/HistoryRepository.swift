@@ -42,7 +42,12 @@ final class HistoryRepository {
                    byte_size, content_hash, source_bundle, created_at
             FROM history_item ORDER BY created_at DESC LIMIT ?;
             """, [.int(Int64(limit))]) { row -> ClipboardItem in
-                let kind: ClipboardItem.Kind = (row.text(0) == "image") ? .image : .text
+                let kind: ClipboardItem.Kind
+                switch row.text(0) {
+                case "image": kind = .image
+                case "file":  kind = .file
+                default:      kind = .text
+                }
                 return ClipboardItem.persisted(
                     hash: row.text(6) ?? "",
                     kind: kind,
@@ -67,7 +72,7 @@ final class HistoryRepository {
             VALUES (?,?,?,?,?,?,?,?,?,NULL)
             ON CONFLICT(content_hash) DO UPDATE SET created_at = excluded.created_at;
             """, [
-                .text(item.kind == .image ? "image" : "text"),
+                .text(Self.kindString(item.kind)),
                 .textOrNull(item.text),
                 .textOrNull(item.imagePath),
                 .intOrNull(item.imageWidth),
@@ -113,6 +118,14 @@ final class HistoryRepository {
     }
 
     // MARK: Helpers
+
+    private static func kindString(_ kind: ClipboardItem.Kind) -> String {
+        switch kind {
+        case .image: return "image"
+        case .file:  return "file"
+        case .text:  return "text"
+        }
+    }
 
     private func imagePath(forHash hash: String) -> String? {
         (try? db.query("SELECT image_path FROM history_item WHERE content_hash = ?;",

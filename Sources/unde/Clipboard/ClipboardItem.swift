@@ -7,6 +7,7 @@ struct ClipboardItem: Identifiable, Equatable {
     enum Kind: Equatable {
         case text
         case image
+        case file   // a reference to an on-disk file; `text` holds its path
     }
 
     let id: String            // content hash — also the dedup key
@@ -32,11 +33,20 @@ struct ClipboardItem: Identifiable, Equatable {
         return nil
     }
 
-    /// A single-line preview suitable for a row, collapsing whitespace.
+    /// The on-disk path for a file item (nil for text/image). Stored in `text`.
+    var filePath: String? {
+        kind == .file ? text : nil
+    }
+
+    /// A single-line preview suitable for a row and for fuzzy search, collapsing
+    /// whitespace. Files match on their full path (so you can search by name or
+    /// containing folder).
     var preview: String {
         switch kind {
         case .image:
             return "Image"
+        case .file:
+            return text ?? ""
         case .text:
             let collapsed = (text ?? "")
                 .replacingOccurrences(of: "\n", with: " ")
@@ -45,28 +55,36 @@ struct ClipboardItem: Identifiable, Equatable {
         }
     }
 
-    /// The primary single-line label shown in a picker row. Text items show their
-    /// preview; images have no filename (they're stored under a content hash), so
-    /// the primary label is just "Image" with the details carried in `rowMeta`.
+    /// The primary single-line label shown in a picker row. Text shows its
+    /// preview; images show "Image"; files show just the filename (the path is
+    /// carried in `rowMeta`).
     var rowLabel: String {
         switch kind {
         case .text:  return preview
         case .image: return "Image"
+        case .file:  return (text.map { ($0 as NSString).lastPathComponent }) ?? "File"
         }
     }
 
     /// Faded, secondary metadata shown after `rowLabel` — dimensions and size for
-    /// images, nil for text.
+    /// images, the (home-abbreviated) path for files, nil for text.
     var rowMeta: String? {
-        guard kind == .image else { return nil }
-        var parts: [String] = []
-        if let w = imageWidth, let h = imageHeight, w > 0, h > 0 {
-            parts.append("\(w) × \(h)")
+        switch kind {
+        case .text:
+            return nil
+        case .file:
+            guard let path = text else { return nil }
+            return (path as NSString).abbreviatingWithTildeInPath
+        case .image:
+            var parts: [String] = []
+            if let w = imageWidth, let h = imageHeight, w > 0, h > 0 {
+                parts.append("\(w) × \(h)")
+            }
+            if byteSize > 0 {
+                parts.append(Self.formattedByteSize(byteSize))
+            }
+            return parts.isEmpty ? nil : parts.joined(separator: " · ")
         }
-        if byteSize > 0 {
-            parts.append(Self.formattedByteSize(byteSize))
-        }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     static func formattedByteSize(_ bytes: Int) -> String {
@@ -116,6 +134,25 @@ struct ClipboardItem: Identifiable, Equatable {
             imageWidth: Int(image.size.width),
             imageHeight: Int(image.size.height),
             byteSize: data.count,
+            sourceBundleID: source,
+            createdAt: date
+        )
+    }
+
+    /// A captured file reference. We store only the path (+ its size), never the
+    /// bytes — the file stays where it is on disk. The content hash keys off the
+    /// path so re-copying the same file bumps it to the top rather than duplicating.
+    static func file(path: String, byteSize: Int, source: String?, at date: Date = Date()) -> ClipboardItem {
+        let hash = Self.hash(of: Data(("file:" + path).utf8))
+        return ClipboardItem(
+            id: hash,
+            kind: .file,
+            text: path,
+            image: nil,
+            imagePath: nil,
+            imageWidth: nil,
+            imageHeight: nil,
+            byteSize: byteSize,
             sourceBundleID: source,
             createdAt: date
         )

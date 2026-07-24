@@ -38,6 +38,7 @@ final class Paster {
     private enum Payload {
         case text(String)
         case image(Data)   // PNG bytes
+        case fileURL(URL)  // a reference to an on-disk file
     }
 
     /// Perform the full paste sequence for a text payload. `previousApp` is the
@@ -51,6 +52,12 @@ final class Paster {
     @discardableResult
     func paste(imageData: Data, previousApp: NSRunningApplication?, mode: PasteMode) -> Outcome {
         paste(.image(imageData), previousApp: previousApp, mode: mode)
+    }
+
+    /// Same, for a file reference — pastes the actual file (into Finder, Mail, …).
+    @discardableResult
+    func paste(fileURL: URL, previousApp: NSRunningApplication?, mode: PasteMode) -> Outcome {
+        paste(.fileURL(fileURL), previousApp: previousApp, mode: mode)
     }
 
     private func paste(_ payload: Payload, previousApp: NSRunningApplication?, mode: PasteMode) -> Outcome {
@@ -114,6 +121,10 @@ final class Paster {
             if let tiff = NSImage(data: data)?.tiffRepresentation {
                 pb.setData(tiff, forType: .tiff)
             }
+        case .fileURL(let url):
+            // Writing the URL object sets both `public.file-url` and the legacy
+            // NSFilenamesPboardType, matching what Finder puts down on ⌘C.
+            pb.writeObjects([url as NSURL])
         }
         return pb.changeCount
     }

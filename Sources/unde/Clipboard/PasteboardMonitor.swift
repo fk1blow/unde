@@ -79,6 +79,33 @@ final class PasteboardMonitor {
         let source = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         if let source, prefs.excludedBundleIDs.contains(source) { return }
 
+        // Files first: a Finder ⌘C carries `public.file-url` *and* the filename as
+        // plain text. We must claim it here — otherwise the text branch below would
+        // silently capture the bare filename. We store only the path (a reference),
+        // never the bytes. `urlReadingFileURLsOnly` keeps web URLs out (they fall
+        // through and are captured as text links).
+        if prefs.fileCaptureMode != .ignore,
+           let urls = pasteboard.readObjects(
+                forClasses: [NSURL.self],
+                options: [.urlReadingFileURLsOnly: true]) as? [URL],
+           !urls.isEmpty {
+            for url in urls {
+                let path = url.path
+                let size = (try? FileManager.default.attributesOfItem(atPath: path)[.size] as? Int) ?? nil
+                history.insert(.file(path: path, byteSize: size ?? 0, source: source))
+            }
+            return
+        }
+        // File present but mode is Ignore: drop it, and don't let the text branch
+        // capture the filename Finder left on the pasteboard.
+        if prefs.fileCaptureMode == .ignore,
+           let urls = pasteboard.readObjects(
+                forClasses: [NSURL.self],
+                options: [.urlReadingFileURLsOnly: true]) as? [URL],
+           !urls.isEmpty {
+            return
+        }
+
         // Prefer text; fall back to image.
         if let string = pasteboard.string(forType: .string),
            !string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {

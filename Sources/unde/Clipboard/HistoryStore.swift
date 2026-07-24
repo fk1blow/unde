@@ -44,6 +44,15 @@ final class HistoryStore: ObservableObject {
         repository?.delete(hash: id)
     }
 
+    /// Remove several items at once (multi-select delete). Mutates the in-memory
+    /// list a single time so the UI refreshes once, then mirrors each removal to
+    /// disk — `delete(hash:)` also cleans up any backing image file per item.
+    func remove(ids: Set<String>) {
+        guard !ids.isEmpty else { return }
+        items.removeAll { ids.contains($0.id) }
+        ids.forEach { repository?.delete(hash: $0) }
+    }
+
     func clear() {
         items.removeAll()
         repository?.clear()

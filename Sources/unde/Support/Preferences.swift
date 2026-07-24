@@ -1,6 +1,14 @@
 import AppKit
 import Carbon.HIToolbox
 
+/// What unde does when a file is copied (a Finder ⌘C carries a `public.file-url`).
+/// Both capturing modes store only a *reference* — the path — never the bytes.
+enum FileCaptureMode: String, CaseIterable {
+    case keepFile   // capture; paste re-pastes the actual file
+    case keepPath   // capture; paste inserts the path as text
+    case ignore     // never capture files
+}
+
 /// A key combination for the global hotkey: a virtual keycode plus Carbon
 /// modifier flags (cmdKey, optionKey, …).
 struct KeyCombo: Equatable, Codable {
@@ -30,6 +38,7 @@ final class Preferences {
         static let skipSecrets = "skipSecrets"
         static let showPreview = "showPreview"
         static let uiScale = "uiScale"
+        static let fileCaptureMode = "fileCaptureMode"
     }
 
     /// Bounds for the picker UI scale (Appearance pref). 1.0 is the design size.
@@ -43,6 +52,7 @@ final class Preferences {
             Key.paused: false,
             Key.showPreview: true,
             Key.uiScale: 1.0,
+            Key.fileCaptureMode: FileCaptureMode.keepFile.rawValue,
             Key.excludedBundleIDs: [
                 "com.apple.keychainaccess",
                 "com.agilebits.onepassword7",
@@ -108,6 +118,12 @@ final class Preferences {
     var excludedBundleIDs: Set<String> {
         get { Set(defaults.stringArray(forKey: Key.excludedBundleIDs) ?? []) }
         set { defaults.set(Array(newValue), forKey: Key.excludedBundleIDs) }
+    }
+
+    /// How a copied file is handled (Clipboard pref). Default keeps the file.
+    var fileCaptureMode: FileCaptureMode {
+        get { FileCaptureMode(rawValue: defaults.string(forKey: Key.fileCaptureMode) ?? "") ?? .keepFile }
+        set { defaults.set(newValue.rawValue, forKey: Key.fileCaptureMode) }
     }
 
     var hotKeyCombo: KeyCombo {

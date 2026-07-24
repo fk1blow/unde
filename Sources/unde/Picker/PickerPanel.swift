@@ -8,7 +8,13 @@ import AppKit
 /// send keystrokes nowhere — so we override it.
 final class PickerPanel: NSPanel {
 
-    init() {
+    /// Whether this panel accepts key status. The main picker panel must (it
+    /// handles keystrokes); the detached preview panel must not, so ordering it in
+    /// never steals key from the main panel and dismisses it.
+    private let acceptsKey: Bool
+
+    init(acceptsKey: Bool = true) {
+        self.acceptsKey = acceptsKey
         super.init(
             contentRect: NSRect(x: 0, y: 0, width: 600, height: 400),
             styleMask: [.nonactivatingPanel, .borderless],
@@ -26,6 +32,6 @@ final class PickerPanel: NSPanel {
         animationBehavior = .utilityWindow
     }
 
-    override var canBecomeKey: Bool { true }
+    override var canBecomeKey: Bool { acceptsKey }
     override var canBecomeMain: Bool { false }
 }
