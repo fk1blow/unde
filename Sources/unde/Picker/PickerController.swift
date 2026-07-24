@@ -386,7 +386,15 @@ final class PickerController: NSObject, NSWindowDelegate {
 
     private func promoteSelected() {
         let rows = model.allRows
-        guard model.selection < rows.count, let clip = rows[model.selection].clip, let text = clip.text else { return }
+        guard model.selection < rows.count else { return }
+        // Already a pinned snippet — nothing to promote, and no notice needed.
+        guard let clip = rows[model.selection].clip else { return }
+        // Snippets are text; an image has no text to pin. Say so rather than
+        // silently doing nothing (which reads as "pinning is broken").
+        guard let text = clip.text, !text.isEmpty else {
+            NoticePresenter.shared.show("Only text can be pinned")
+            return
+        }
         // Don't create a second copy of something already pinned (SNP dedup).
         if snippets.isPinned(content: text) {
             NoticePresenter.shared.show("Already pinned")
