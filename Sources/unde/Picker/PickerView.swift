@@ -12,7 +12,28 @@ struct PickerView: View {
     /// Called when the pointer enters a row, with its global index.
     var onHoverRow: (Int) -> Void
 
+    // Layout — the window holds the main card and, when there's something worth
+    // showing, a detached preview card floating to its right across a transparent
+    // gap. `windowWidth` must match `PickerController.panelWidth`.
+    static let mainWidth: CGFloat = 600
+    static let previewWidth: CGFloat = 300
+    static let cardGap: CGFloat = 18
+    static let windowWidth: CGFloat = mainWidth + cardGap + previewWidth
+
     var body: some View {
+        HStack(alignment: .top, spacing: Self.cardGap) {
+            mainCard
+                .frame(width: Self.mainWidth)
+            if let kind = previewKind {
+                previewCard(kind)
+                    .frame(width: Self.previewWidth)
+            }
+        }
+        .frame(width: Self.windowWidth, alignment: .topLeading)
+    }
+
+    /// The main panel: search row, the results list, and the footer of hints.
+    private var mainCard: some View {
         VStack(spacing: 0) {
             searchRow
             Divider().overlay(Theme.divider)
@@ -26,7 +47,6 @@ struct PickerView: View {
             RoundedRectangle(cornerRadius: Theme.radiusPanel, style: .continuous)
                 .strokeBorder(Theme.neutral500.opacity(0.5), lineWidth: 1)
         )
-        .frame(width: 600)
     }
 
     // MARK: Search row
@@ -66,16 +86,13 @@ struct PickerView: View {
                         sectionHeader("Pinned snippets")
                         ForEach(Array(model.pinnedRows.enumerated()), id: \.element.id) { offset, row in
                             rowView(row, index: offset)
-                                .id(offset)
                         }
                     }
                     if !model.clipRows.isEmpty {
                         sectionHeader("Clipboard history")
                             .padding(.top, model.pinnedRows.isEmpty ? 0 : 6)
                         ForEach(Array(model.clipRows.enumerated()), id: \.element.id) { offset, row in
-                            let index = model.pinnedRows.count + offset
-                            rowView(row, index: index)
-                                .id(index)
+                            rowView(row, index: model.pinnedRows.count + offset)
                         }
                     }
                     if model.isEmpty {
@@ -97,11 +114,125 @@ struct PickerView: View {
                     model.suppressAutoScroll = false
                     return
                 }
+                // Scroll by the row's stable id (the same identity ForEach uses),
+                // not a positional index — a second, positional identity would
+                // confuse SwiftUI's diffing and leave stale rows highlighted.
+                let rows = model.allRows
+                guard newValue >= 0, newValue < rows.count else { return }
+                let targetID = rows[newValue].id
                 withAnimation(.easeOut(duration: 0.08)) {
-                    proxy.scrollTo(newValue, anchor: .center)
+                    proxy.scrollTo(targetID, anchor: .center)
                 }
             }
         }
+    }
+
+    // MARK: Preview card
+
+    /// What the detached preview should show for the current selection. `nil`
+    /// means no preview — a single-line snippet that already fits in its row
+    /// tells you everything, so we don't float an extra card for it.
+    private enum PreviewKind {
+        case color(String)   // a hex string like "#FF00FF"
+        case image(DisplayRow)
+        case text(String)    // multi-line or long-enough-to-be-truncated text
+
+        var header: String {
+            switch self {
+            case .color: return "Color preview"
+            case .image: return "Image preview"
+            case .text:  return "Preview"
+            }
+        }
+    }
+
+    /// The single-line row can hold roughly this many characters before it
+    /// truncates; past it, the preview earns its place.
+    private static let truncationThreshold = 58
+
+    private var previewKind: PreviewKind? {
+        guard let row = model.selectedRow else { return nil }
+        if row.image != nil { return .image(row) }
+        let full = row.fullText
+        if let hex = Self.hexColor(full) { return .color(hex) }
+        if full.contains("\n") || full.count > Self.truncationThreshold { return .text(full) }
+        return nil
+    }
+
+    /// A detached card, floating to the right of the main panel, whose contents
+    /// depend on the selection's type.
+    private func previewCard(_ kind: PreviewKind) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(kind.header.uppercased())
+                .font(.system(size: 10.5, weight: .semibold))
+                .tracking(1.2)
+                .foregroundColor(Theme.neutral600)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 13)
+            Divider().overlay(Theme.divider)
+            previewBody(kind)
+                .padding(16)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.surface)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.radiusPanel, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.radiusPanel, style: .continuous)
+                .strokeBorder(Theme.neutral500.opacity(0.5), lineWidth: 1)
+        )
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    @ViewBuilder
+    private func previewBody(_ kind: PreviewKind) -> some View {
+        switch kind {
+        case .color(let hex):
+            VStack(alignment: .leading, spacing: 12) {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color(hexString: hex) ?? .clear)
+                    .frame(height: 150)
+                    .frame(maxWidth: .infinity)
+                Text(hex)
+                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .foregroundColor(Theme.text)
+            }
+        case .image(let row):
+            VStack(alignment: .leading, spacing: 10) {
+                if let image = row.image {
+                    Image(nsImage: image)
+                        .resizable()
+                        .interpolation(.medium)
+                        .aspectRatio(contentMode: .fit)
+                        .frame(maxWidth: .infinity)
+                        .frame(maxHeight: 220)
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+                if let clip = row.clip, let w = clip.imageWidth, let h = clip.imageHeight {
+                    Text("\(w) × \(h)")
+                        .font(.system(size: 12))
+                        .foregroundColor(Theme.neutral500)
+                }
+            }
+        case .text(let full):
+            ScrollView {
+                Text(full)
+                    .font(.system(size: 13))
+                    .foregroundColor(Theme.text)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: 300)
+        }
+    }
+
+    /// Recognise a bare 3- or 6-digit hex colour (with leading `#`), so colours
+    /// get a swatch instead of being treated as ordinary text.
+    static func hexColor(_ s: String) -> String? {
+        let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard t.range(of: "^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$", options: .regularExpression) != nil else {
+            return nil
+        }
+        return t.uppercased()
     }
 
     private func sectionHeader(_ title: String) -> some View {
@@ -122,6 +253,11 @@ struct PickerView: View {
                 .foregroundColor(Theme.text)
                 .lineLimit(1)
                 .truncationMode(.tail)
+            if let hex = Self.hexColor(row.fullText), let color = Color(hexString: hex) {
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(color)
+                    .frame(width: 22, height: 22)
+            }
             Spacer(minLength: 6)
             if let slot = row.slot {
                 KBD("⌘\(slot)")

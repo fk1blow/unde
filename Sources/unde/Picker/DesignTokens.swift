@@ -39,4 +39,16 @@ extension Color {
         let b = Double(hex & 0xFF) / 255.0
         self.init(.sRGB, red: r, green: g, blue: b, opacity: opacity)
     }
+
+    /// Parse a `#RGB` or `#RRGGBB` string into a colour, expanding the short form.
+    /// Returns nil for anything that isn't a valid hex colour.
+    init?(hexString: String) {
+        var s = hexString.trimmingCharacters(in: .whitespacesAndNewlines)
+        if s.hasPrefix("#") { s.removeFirst() }
+        if s.count == 3 {
+            s = s.map { "\($0)\($0)" }.joined()
+        }
+        guard s.count == 6, let value = UInt32(s, radix: 16) else { return nil }
+        self.init(hex: value)
+    }
 }

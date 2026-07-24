@@ -15,6 +15,12 @@ struct DisplayRow: Identifiable {
     // Backing data for the action layer.
     let snippet: Snippet?
     let clip: ClipboardItem?
+
+    /// The full, untruncated text for the preview pane (keeps newlines, unlike
+    /// the single-line `text`).
+    var fullText: String {
+        snippet?.content ?? clip?.text ?? text
+    }
 }
 
 /// Observable state the SwiftUI picker renders. Owned and driven by
@@ -36,6 +42,13 @@ final class PickerModel: ObservableObject {
     var allRows: [DisplayRow] { pinnedRows + clipRows }
     var isEmpty: Bool { pinnedRows.isEmpty && clipRows.isEmpty }
     var count: Int { pinnedRows.count + clipRows.count }
+
+    /// The currently highlighted row, if any — drives the preview pane.
+    var selectedRow: DisplayRow? {
+        let rows = allRows
+        guard selection >= 0, selection < rows.count else { return nil }
+        return rows[selection]
+    }
 
     var countLabel: String {
         let n = count

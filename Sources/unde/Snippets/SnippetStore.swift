@@ -32,6 +32,12 @@ final class SnippetStore: ObservableObject {
         snippets.first { $0.slot == slot }
     }
 
+    /// Whether a snippet with exactly this content is already pinned — used to
+    /// prevent duplicate pins.
+    func isPinned(content: String) -> Bool {
+        snippets.contains { $0.content == content }
+    }
+
     // MARK: Mutation
 
     func add(_ snippet: Snippet) {
@@ -54,6 +60,11 @@ final class SnippetStore: ObservableObject {
     /// assigning the lowest free slot 1–9 if one is available (SNP-1).
     @discardableResult
     func promote(text: String, label: String? = nil) -> Snippet {
+        // Idempotent: if this exact content is already pinned, return the existing
+        // snippet rather than creating a duplicate.
+        if let existing = snippets.first(where: { $0.content == text }) {
+            return existing
+        }
         let nextOrder = (snippets.map(\.sortOrder).max() ?? -1) + 1
         let snippet = Snippet(
             label: label,

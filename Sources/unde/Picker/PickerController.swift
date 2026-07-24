@@ -98,15 +98,24 @@ final class PickerController: NSObject, NSWindowDelegate {
         isDismissing = false
     }
 
-    // Fixed panel size — modest, consistent on every open.
-    static let panelWidth: CGFloat = 600
+    // Fixed panel size — modest, consistent on every open. The window spans the
+    // main card plus the detached preview card and gap; the window background is
+    // clear, so the space to the right of the main card is invisible when no
+    // preview is showing.
+    static let panelWidth: CGFloat = PickerView.windowWidth
     static let panelHeight: CGFloat = 420
 
     private func positionPanel(size: NSSize) {
         let mouse = NSEvent.mouseLocation
         let screen = NSScreen.screens.first { $0.frame.contains(mouse) } ?? NSScreen.main
         guard let visible = screen?.visibleFrame else { return }
-        let x = visible.midX - size.width / 2
+        // Centre the *main card* on screen (not the whole window), so the panel
+        // sits where the user expects and the preview floats off to its right.
+        var x = visible.midX - PickerView.mainWidth / 2
+        // Keep the window fully on screen; if the preview would overflow the
+        // right edge, slide the whole thing left rather than clip it.
+        x = min(x, visible.maxX - size.width)
+        x = max(x, visible.minX)
         let topInset = visible.height * 0.14
         let y = visible.maxY - topInset - size.height
         panel.setFrameOrigin(NSPoint(x: x.rounded(), y: y.rounded()))
@@ -225,9 +234,26 @@ final class PickerController: NSObject, NSWindowDelegate {
         }
     }
 
+    /// Delete the previous word from the query: drop any trailing spaces, then the
+    /// run of non-space characters before them.
+    private func deleteWordFromQuery() {
+        guard !model.query.isEmpty else { return }
+        var q = model.query
+        while let last = q.last, last == " " { q.removeLast() }
+        while let last = q.last, last != " " { q.removeLast() }
+        model.query = q
+        model.selection = 0
+        rebuildRows()
+    }
+
     private func promoteSelected() {
         let rows = model.allRows
         guard model.selection < rows.count, let clip = rows[model.selection].clip, let text = clip.text else { return }
+        // Don't create a second copy of something already pinned (SNP dedup).
+        if snippets.isPinned(content: text) {
+            NoticePresenter.shared.show("Already pinned")
+            return
+        }
         snippets.promote(text: text)
         rebuildRows()
         NoticePresenter.shared.show("Pinned to snippets")
@@ -279,7 +305,19 @@ final class PickerController: NSObject, NSWindowDelegate {
         if cmd {
             if let n = Int(chars), (1...9).contains(n) { pastePinnedSlot(n); return true }
             if chars == "p" { promoteSelected(); return true }
-            if code == kVK_Delete { deleteSelected(); return true }
+            if code == kVK_Delete {
+                // While searching, ⌘⌫ clears the query to the start (standard
+                // "delete to beginning of line"). With no query it falls back to
+                // deleting the selected item.
+                if model.query.isEmpty {
+                    deleteSelected()
+                } else {
+                    model.query = ""
+                    model.selection = 0
+                    rebuildRows()
+                }
+                return true
+            }
             if code == kVK_Return || code == kVK_ANSI_KeypadEnter { commitSelected(mode: .copyOnly); return true }
             return true // swallow other cmd combos while open
         }
@@ -294,7 +332,10 @@ final class PickerController: NSObject, NSWindowDelegate {
         case kVK_UpArrow:
             move(-1); return true
         case kVK_Delete: // backspace edits the query
-            if !model.query.isEmpty {
+            if ctrl {
+                // ⌃⌫ deletes the previous word of the query.
+                deleteWordFromQuery()
+            } else if !model.query.isEmpty {
                 model.query.removeLast()
                 rebuildRows()
             }
