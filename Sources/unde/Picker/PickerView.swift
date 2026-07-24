@@ -168,9 +168,11 @@ struct PickerView: View {
     // MARK: Footer
 
     private var footer: some View {
-        HStack(spacing: 18) {
+        HStack(spacing: 13) {
             hint("↑↓", "navigate")
-            hint("⏎", "paste in place")
+            hint("⏎", "paste")
+            hint("⌘P", "pin")
+            hint("⌘⌫", "delete")
             hint("⌘1–9", "jump")
             Spacer()
             Text(model.countLabel)

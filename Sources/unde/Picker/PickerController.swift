@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import Combine
 import Carbon.HIToolbox
 
 /// Owns the picker panel, its SwiftUI content, selection state, and all keyboard
@@ -21,6 +22,7 @@ final class PickerController: NSObject, NSWindowDelegate {
     private var previousApp: NSRunningApplication?
     private var isVisible = false
     private var isDismissing = false
+    private var cancellables = Set<AnyCancellable>()
 
     init(history: HistoryStore, snippets: SnippetStore, paster: Paster, imageStore: ImageStore? = nil) {
         self.history = history
@@ -37,6 +39,19 @@ final class PickerController: NSObject, NSWindowDelegate {
         hostingView = NSHostingView(rootView: view)
         panel.contentView = hostingView
         panel.delegate = self
+
+        // Live-refresh the list while the picker is open, so a copy made with the
+        // panel up (or a just-captured item) appears immediately.
+        Publishers.Merge(
+            history.$items.map { _ in () },
+            snippets.$snippets.map { _ in () }
+        )
+        .receive(on: RunLoop.main)
+        .sink { [weak self] in
+            guard let self, self.isVisible else { return }
+            self.rebuildRows()
+        }
+        .store(in: &cancellables)
     }
 
     // MARK: Show / hide
