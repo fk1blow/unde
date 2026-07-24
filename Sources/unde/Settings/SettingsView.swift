@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 /// The settings UI: General, Snippets, Privacy. Kept intentionally spare — this
 /// is a personal tool with one user, so the panes expose exactly the knobs the
@@ -7,6 +8,7 @@ import AppKit
 struct SettingsView: View {
     let prefs: Preferences
     @ObservedObject var snippets: SnippetStore
+    let history: HistoryStore
     let onHotKeyChange: (KeyCombo) -> Void
 
     var body: some View {
@@ -15,7 +17,7 @@ struct SettingsView: View {
                 .tabItem { Label("General", systemImage: "gearshape") }
             SnippetsPane(snippets: snippets)
                 .tabItem { Label("Snippets", systemImage: "pin") }
-            PrivacyPane(prefs: prefs)
+            PrivacyPane(prefs: prefs, history: history)
                 .tabItem { Label("Privacy", systemImage: "hand.raised") }
         }
         .frame(width: 560, height: 460)
@@ -230,12 +232,17 @@ private struct SnippetEditor: View {
 
 private struct PrivacyPane: View {
     let prefs: Preferences
+    let history: HistoryStore
     @State private var excluded: [String]
     @State private var newID = ""
+    @State private var skipSecrets: Bool
+    @State private var confirmingClear = false
 
-    init(prefs: Preferences) {
+    init(prefs: Preferences, history: HistoryStore) {
         self.prefs = prefs
+        self.history = history
         _excluded = State(initialValue: Array(prefs.excludedBundleIDs).sorted())
+        _skipSecrets = State(initialValue: prefs.skipSecrets)
     }
 
     var body: some View {
@@ -257,18 +264,53 @@ private struct PrivacyPane: View {
                     }
                 }
             }
+            .frame(minHeight: 120)
             HStack {
                 TextField("com.example.app", text: $newID)
-                Button("Add") {
-                    let trimmed = newID.trimmingCharacters(in: .whitespaces)
-                    guard !trimmed.isEmpty else { return }
-                    if !excluded.contains(trimmed) { excluded.append(trimmed); excluded.sort() }
-                    newID = ""
-                    persist()
+                Button("Add App…") { pickApp() }
+                Button("Add") { addTypedID() }
+            }
+
+            Divider()
+
+            Toggle("Skip capturing things that look like secrets (keys, tokens, JWTs)", isOn: $skipSecrets)
+                .onChange(of: skipSecrets) { prefs.skipSecrets = $0 }
+
+            HStack {
+                Button(role: .destructive) { confirmingClear = true } label: {
+                    Label("Clear clipboard history…", systemImage: "trash")
                 }
+                Spacer()
             }
         }
         .padding()
+        .confirmationDialog("Clear all clipboard history?", isPresented: $confirmingClear, titleVisibility: .visible) {
+            Button("Clear History", role: .destructive) { history.clear() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This permanently removes all captured items and their images. Pinned snippets are not affected.")
+        }
+    }
+
+    /// Native app picker → resolve the chosen .app to its bundle identifier.
+    private func pickApp() {
+        let panel = NSOpenPanel()
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        panel.allowedContentTypes = [.application]
+        panel.allowsMultipleSelection = false
+        if panel.runModal() == .OK, let url = panel.url,
+           let bundle = Bundle(url: url), let id = bundle.bundleIdentifier {
+            if !excluded.contains(id) { excluded.append(id); excluded.sort() }
+            persist()
+        }
+    }
+
+    private func addTypedID() {
+        let trimmed = newID.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        if !excluded.contains(trimmed) { excluded.append(trimmed); excluded.sort() }
+        newID = ""
+        persist()
     }
 
     private func persist() {

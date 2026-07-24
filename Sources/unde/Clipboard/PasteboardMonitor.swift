@@ -83,6 +83,8 @@ final class PasteboardMonitor {
         if let string = pasteboard.string(forType: .string),
            !string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             guard string.utf8.count <= Self.maxTextBytes else { return }
+            // Optionally skip anything that looks like a secret (PRV-5).
+            if prefs.skipSecrets, SecretDetector.looksSecret(string) { return }
             history.insert(.text(string, source: source))
             return
         }

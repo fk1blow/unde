@@ -10,6 +10,11 @@ let package = Package(
         .executableTarget(
             name: "unde",
             path: "Sources/unde"
+        ),
+        .testTarget(
+            name: "undeTests",
+            dependencies: ["unde"],
+            path: "Tests/undeTests"
         )
     ]
 )

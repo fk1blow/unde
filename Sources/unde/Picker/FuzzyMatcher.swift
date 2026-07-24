@@ -28,10 +28,13 @@ enum FuzzyMatcher {
             if char == q[qi] {
                 // Base point for a match.
                 score += 1
-                // Consecutive-run bonus.
-                if lastMatch == ci - 1 { score += 5 }
+                // Consecutive-run bonus — weighted above the boundary bonus so a
+                // contiguous substring ("sch"→"schedule") beats scattered word
+                // initials ("sch"→"some cheap hat"). Predictability matters more
+                // than cleverness when muscle memory is the goal.
+                if lastMatch == ci - 1 { score += 8 }
                 // Word-boundary bonus (start of word).
-                if isBoundary { score += 8 }
+                if isBoundary { score += 6 }
                 // Earlier matches are slightly better.
                 score += max(0, 4 - ci / 8)
                 lastMatch = ci

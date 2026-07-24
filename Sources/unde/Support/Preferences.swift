@@ -27,6 +27,7 @@ final class Preferences {
         static let paused = "paused"
         static let excludedBundleIDs = "excludedBundleIDs"
         static let launchAtLogin = "launchAtLogin"
+        static let skipSecrets = "skipSecrets"
     }
 
     init() {
@@ -72,6 +73,12 @@ final class Preferences {
     var launchAtLogin: Bool {
         get { defaults.bool(forKey: Key.launchAtLogin) }
         set { defaults.set(newValue, forKey: Key.launchAtLogin) }
+    }
+
+    /// Skip capturing strings that look like secrets (PRV-5). Off by default.
+    var skipSecrets: Bool {
+        get { defaults.bool(forKey: Key.skipSecrets) }
+        set { defaults.set(newValue, forKey: Key.skipSecrets) }
     }
 
     var excludedBundleIDs: Set<String> {

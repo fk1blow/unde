@@ -91,6 +91,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         SettingsWindowController.shared.show(
             prefs: prefs,
             snippets: snippetStore,
+            history: history,
             onHotKeyChange: { [weak self] combo in self?.updateHotKey(combo) }
         )
     }

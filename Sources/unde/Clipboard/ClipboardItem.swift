@@ -49,9 +49,11 @@ struct ClipboardItem: Identifiable, Equatable {
     var classification: String {
         guard kind == .text, let t = text else { return "image" }
         if t.hasPrefix("http://") || t.hasPrefix("https://") { return "link" }
-        if t.range(of: "^[A-Z0-9][A-Z0-9\\-_]{3,}$", options: .regularExpression) != nil { return "code" }
+        // Check date and email before the generic code pattern, which would
+        // otherwise swallow an ISO date (all digits and dashes).
         if t.range(of: "^\\d{4}-\\d{2}-\\d{2}$", options: .regularExpression) != nil { return "date" }
         if t.contains("@"), !t.contains(" "), t.contains(".") { return "email" }
+        if t.range(of: "^[A-Z0-9][A-Z0-9\\-_]{3,}$", options: .regularExpression) != nil { return "code" }
         return "text"
     }
 
