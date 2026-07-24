@@ -215,11 +215,16 @@ final class PickerController: NSObject, NSWindowDelegate {
         guard model.selection < rows.count else { return }
         let row = rows[model.selection]
         if let clip = row.clip {
+            // ⌘Delete removes a history item (PRV-3).
             history.remove(id: clip.id)
-        } else if let snippet = row.snippet {
-            snippets.delete(id: snippet.id)
+            rebuildRows()
+        } else if row.snippet != nil {
+            // Pinned snippets are permanent by design (core concept in the PRD):
+            // they are never evicted and are managed deliberately in Settings, not
+            // destroyed by a single keystroke over a default-selected row. Refuse
+            // the delete here and point the user at the right place.
+            NoticePresenter.shared.show("Snippets are permanent — edit or remove them in Settings")
         }
-        rebuildRows()
     }
 
     // MARK: Keyboard

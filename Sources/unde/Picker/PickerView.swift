@@ -88,7 +88,7 @@ struct PickerView: View {
                 }
                 .padding(8)
             }
-            .frame(maxHeight: 340)
+            .frame(minHeight: 120, maxHeight: 340)
             .onChange(of: model.selection) { newValue in
                 withAnimation(.easeOut(duration: 0.08)) {
                     proxy.scrollTo(newValue, anchor: .center)
