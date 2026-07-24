@@ -11,6 +11,7 @@ final class PickerController: NSObject, NSWindowDelegate {
     private let history: HistoryStore
     private let snippets: SnippetStore
     private let paster: Paster
+    private let imageStore: ImageStore?
 
     private let model = PickerModel()
     private let panel = PickerPanel()
@@ -21,10 +22,11 @@ final class PickerController: NSObject, NSWindowDelegate {
     private var isVisible = false
     private var isDismissing = false
 
-    init(history: HistoryStore, snippets: SnippetStore, paster: Paster) {
+    init(history: HistoryStore, snippets: SnippetStore, paster: Paster, imageStore: ImageStore? = nil) {
         self.history = history
         self.snippets = snippets
         self.paster = paster
+        self.imageStore = imageStore
         super.init()
 
         let view = PickerView(
@@ -131,7 +133,7 @@ final class PickerController: NSObject, NSWindowDelegate {
                 subtitle: nil,
                 meta: "Copied \(Self.relativeTime(item.createdAt)) · \(item.classification)",
                 slot: nil,
-                image: item.image,
+                image: item.resolvedImage(using: imageStore),
                 snippet: nil,
                 clip: item
             )

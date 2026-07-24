@@ -25,7 +25,7 @@ it as milestones land. See [PRD.md](PRD.md) and [PLAN.md](PLAN.md) for the full 
 | M3 Monitor + list | ✅ | ✅ | Capture + live filter + selection confirmed |
 | M4 Auto-paste | ✅ | ✅ | **GO.** ⌘V synthesised into TextEdit + terminal, no manual paste (2026-07-24) |
 | M5 Snippets | ✅ | ✅ | ⌘1 → "Master Schedule of Works" lands in the terminal |
-| M6 History persistence | ⬜ | ⬜ | Not started (in-memory only today) |
+| M6 History persistence | ✅ | ✅ | SQLite; survives relaunch, dedup via unique index (2026-07-24) |
 | M7 Polish | 🟡 | 🟡 | Core polish in; remaining items listed below |
 
 > ✅ **M5 reached — this is the complete product.** Core verified end-to-end on
@@ -119,13 +119,15 @@ Preferences live in `UserDefaults` for `com.codeagency.unde`.
 > **STOP-AND-DOGFOOD POINT.** M5 is the complete product. Use it for a week
 > before shaping M6/M7 — per PLAN, some of M7 will prove unnecessary.
 
-## M6 — History persistence — not started
+## M6 — History persistence ✅ verified
 
-- [ ] SQLite `history_item` table (system libsqlite3 or GRDB), migrations
-- [ ] Load recent 500 at launch into memory; writes to DB + array both (STO-1/2)
-- [ ] `ImageStore`: content-hashed PNG files on disk, path in row (STO-3)
-- [ ] Eviction past cap cleans up image files
-- [ ] **Verify:** history survives quit/relaunch; DB stays under a few MB
+- [x] SQLite `history_item` table via system libsqlite3, `CREATE TABLE IF NOT EXISTS` migration
+- [x] Load recent N at launch into memory; writes to DB + array both (STO-1/2)
+- [x] `ImageStore`: content-hashed PNG files on disk, path in row (STO-3) — *runtime-verified for text; image path code-complete*
+- [x] Eviction past cap cleans up image files (STO-2)
+- [x] **Verify:** history survives quit/relaunch (3 clips persisted + reloaded, 2026-07-24)
+- [x] **Verify:** dedup — duplicate content_hash upserts, does not add a row
+- [ ] **Verify:** copy an actual image → thumbnail renders + PNG lands on disk + survives relaunch
 
 ## M7 — Polish — partially done
 

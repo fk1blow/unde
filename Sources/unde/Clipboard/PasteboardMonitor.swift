@@ -8,6 +8,7 @@ final class PasteboardMonitor {
     private let pasteboard = NSPasteboard.general
     private let prefs: Preferences
     private let history: HistoryStore
+    private let imageStore: ImageStore?
 
     private var timer: Timer?
     private var lastChangeCount: Int
@@ -26,9 +27,10 @@ final class PasteboardMonitor {
     private static let maxTextBytes = 1_000_000    // 1MB (STO-4)
     private static let maxImageBytes = 10_000_000  // 10MB (STO-4)
 
-    init(prefs: Preferences, history: HistoryStore) {
+    init(prefs: Preferences, history: HistoryStore, imageStore: ImageStore? = nil) {
         self.prefs = prefs
         self.history = history
+        self.imageStore = imageStore
         self.lastChangeCount = pasteboard.changeCount
     }
 
@@ -85,12 +87,21 @@ final class PasteboardMonitor {
             return
         }
 
-        // Image: try PNG then TIFF (CAP-2).
+        // Image: try PNG then TIFF (CAP-2). Persist the bytes to the image store
+        // immediately and record the on-disk path so the item survives relaunch.
         for type in [NSPasteboard.PasteboardType.png, .tiff] {
             if let data = pasteboard.data(forType: type),
                data.count <= Self.maxImageBytes,
                let image = NSImage(data: data) {
-                history.insert(.image(image, data: data, source: source))
+                let hash = ClipboardItem.hash(of: data)
+                let path = imageStore?.save(data: data, hash: hash)
+                let item = ClipboardItem.persisted(
+                    hash: hash, kind: .image, text: nil,
+                    imagePath: path, imageWidth: Int(image.size.width),
+                    imageHeight: Int(image.size.height), byteSize: data.count,
+                    source: source, createdAt: Date()
+                )
+                history.insert(item)
                 return
             }
         }

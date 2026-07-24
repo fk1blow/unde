@@ -6,6 +6,9 @@ import AppKit
 final class AppDelegate: NSObject, NSApplicationDelegate {
 
     let prefs = Preferences()
+    private(set) var database: SQLiteDatabase?
+    private(set) var imageStore: ImageStore!
+    private(set) var historyRepo: HistoryRepository?
     private(set) var snippetStore: SnippetStore!
     private(set) var history: HistoryStore!
     private(set) var monitor: PasteboardMonitor!
@@ -15,21 +18,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotKey: HotKey?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Storage layer: single SQLite file + content-addressed image files, both
+        // under Application Support. If the DB can't be opened the app still runs,
+        // just without persistence — history falls back to in-memory only.
+        imageStore = ImageStore()
+        if let dbURL = Self.databaseURL() {
+            database = try? SQLiteDatabase(path: dbURL.path)
+        }
+        if let database {
+            historyRepo = HistoryRepository(db: database, imageStore: imageStore)
+        }
+
         // Data layer.
         snippetStore = SnippetStore()
-        history = HistoryStore(capacity: prefs.historyCapacity)
+        history = HistoryStore(capacity: prefs.historyCapacity, repository: historyRepo)
 
         // Paste engine + capture. The paster tells the monitor which pasteboard
         // change counts it caused, so we never re-capture our own writes (CAP-7).
         paster = Paster(prefs: prefs)
-        monitor = PasteboardMonitor(prefs: prefs, history: history)
+        monitor = PasteboardMonitor(prefs: prefs, history: history, imageStore: imageStore)
         paster.onWillWrite = { [weak monitor] changeCount in
             monitor?.suppress(changeCount: changeCount)
         }
 
         // The picker panel and its whole view hierarchy are built now and only
         // ever hidden/shown afterwards — never reconstructed (perf budget).
-        picker = PickerController(history: history, snippets: snippetStore, paster: paster)
+        picker = PickerController(history: history, snippets: snippetStore, paster: paster, imageStore: imageStore)
 
         // Menu bar item — the only persistent UI.
         menu = MenuBarController(prefs: prefs, monitor: monitor, paster: paster) { [weak self] in
@@ -62,6 +76,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotKey = HotKey(keyCombo: combo) { [weak self] in
             self?.picker.toggle()
         }
+    }
+
+    private static func databaseURL() -> URL? {
+        guard let support = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+        else { return nil }
+        let dir = support.appendingPathComponent("unde", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("unde.sqlite")
     }
 
     private func openSettings() {

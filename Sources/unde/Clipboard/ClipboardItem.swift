@@ -12,13 +12,24 @@ struct ClipboardItem: Identifiable, Equatable {
     let id: String            // content hash — also the dedup key
     let kind: Kind
     let text: String?         // text payload, nil for images
-    let image: NSImage?       // in-memory image, nil for text
+    let image: NSImage?       // in-memory image (fresh capture), nil once persisted
+    let imagePath: String?    // on-disk filename for a persisted image, else nil
+    let imageWidth: Int?
+    let imageHeight: Int?
     let byteSize: Int
     let sourceBundleID: String?
     var createdAt: Date
 
     static func == (lhs: ClipboardItem, rhs: ClipboardItem) -> Bool {
         lhs.id == rhs.id
+    }
+
+    /// The image to render: the in-memory copy if present, else loaded lazily
+    /// from disk. Loading is left to the caller's `ImageStore`.
+    func resolvedImage(using store: ImageStore?) -> NSImage? {
+        if let image { return image }
+        if let imagePath { return store?.loadImage(path: imagePath) }
+        return nil
     }
 
     /// A single-line preview suitable for a row, collapsing whitespace.
@@ -53,6 +64,9 @@ struct ClipboardItem: Identifiable, Equatable {
             kind: .text,
             text: string,
             image: nil,
+            imagePath: nil,
+            imageWidth: nil,
+            imageHeight: nil,
             byteSize: string.utf8.count,
             sourceBundleID: source,
             createdAt: date
@@ -66,9 +80,39 @@ struct ClipboardItem: Identifiable, Equatable {
             kind: .image,
             text: nil,
             image: image,
+            imagePath: nil,
+            imageWidth: Int(image.size.width),
+            imageHeight: Int(image.size.height),
             byteSize: data.count,
             sourceBundleID: source,
             createdAt: date
+        )
+    }
+
+    /// Reconstruct an item loaded from the database. The image itself is loaded
+    /// lazily from `imagePath` via `resolvedImage(using:)`.
+    static func persisted(
+        hash: String,
+        kind: Kind,
+        text: String?,
+        imagePath: String?,
+        imageWidth: Int?,
+        imageHeight: Int?,
+        byteSize: Int,
+        source: String?,
+        createdAt: Date
+    ) -> ClipboardItem {
+        ClipboardItem(
+            id: hash,
+            kind: kind,
+            text: text,
+            image: nil,
+            imagePath: imagePath,
+            imageWidth: imageWidth,
+            imageHeight: imageHeight,
+            byteSize: byteSize,
+            sourceBundleID: source,
+            createdAt: createdAt
         )
     }
 
