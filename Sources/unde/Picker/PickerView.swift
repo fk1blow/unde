@@ -111,25 +111,11 @@ struct PickerView: View {
         let active = index == model.selection
         return HStack(spacing: 11) {
             icon(for: row)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(row.title)
-                    .font(.system(size: 14))
-                    .foregroundColor(Theme.text)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                if let subtitle = row.subtitle, !subtitle.isEmpty {
-                    Text(subtitle)
-                        .font(.system(size: 12))
-                        .foregroundColor(Theme.neutral500)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
-                if let meta = row.meta {
-                    Text(meta)
-                        .font(.system(size: 11.5))
-                        .foregroundColor(Theme.neutral600)
-                }
-            }
+            Text(row.text)
+                .font(.system(size: 14))
+                .foregroundColor(Theme.text)
+                .lineLimit(1)
+                .truncationMode(.tail)
             Spacer(minLength: 6)
             if let slot = row.slot {
                 KBD("⌘\(slot)")

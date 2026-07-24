@@ -101,9 +101,7 @@ final class PickerController: NSObject, NSWindowDelegate {
             DisplayRow(
                 id: "s-\(snippet.id.uuidString)",
                 kind: .pinned,
-                title: snippet.title,
-                subtitle: snippet.label != nil ? snippet.content.replacingOccurrences(of: "\n", with: "  ") : nil,
-                meta: nil,
+                text: snippet.content.replacingOccurrences(of: "\n", with: "  "),
                 slot: snippet.slot,
                 image: nil,
                 snippet: snippet,
@@ -129,9 +127,7 @@ final class PickerController: NSObject, NSWindowDelegate {
             DisplayRow(
                 id: "c-\(item.id)",
                 kind: .clip,
-                title: item.preview.isEmpty ? "Image" : item.preview,
-                subtitle: nil,
-                meta: "Copied \(Self.relativeTime(item.createdAt)) · \(item.classification)",
+                text: item.preview.isEmpty ? "Image" : item.preview,
                 slot: nil,
                 image: item.resolvedImage(using: imageStore),
                 snippet: nil,
@@ -169,8 +165,8 @@ final class PickerController: NSObject, NSWindowDelegate {
     private func pastePinnedSlot(_ slot: Int) {
         guard let snippet = snippets.snippet(forSlot: slot) else { return }
         let row = DisplayRow(
-            id: "s-\(snippet.id.uuidString)", kind: .pinned, title: snippet.title,
-            subtitle: nil, meta: nil, slot: slot, image: nil, snippet: snippet, clip: nil
+            id: "s-\(snippet.id.uuidString)", kind: .pinned, text: snippet.content,
+            slot: slot, image: nil, snippet: snippet, clip: nil
         )
         performPaste(row: row, mode: .pasteInPlace)
     }
@@ -307,15 +303,5 @@ final class PickerController: NSObject, NSWindowDelegate {
         // part of a paste.
         guard isVisible, !isDismissing else { return }
         hide()
-    }
-
-    // MARK: Helpers
-
-    static func relativeTime(_ date: Date) -> String {
-        let seconds = Date().timeIntervalSince(date)
-        if seconds < 60 { return "just now" }
-        if seconds < 3600 { return "\(Int(seconds / 60))m ago" }
-        if seconds < 86400 { return "\(Int(seconds / 3600))h ago" }
-        return "\(Int(seconds / 86400))d ago"
     }
 }

@@ -8,9 +8,7 @@ struct DisplayRow: Identifiable {
 
     let id: String
     let kind: Kind
-    let title: String        // snippet label / clip preview (first line)
-    let subtitle: String?    // snippet content preview
-    let meta: String?        // clip meta line ("Copied 2m ago · code")
+    let text: String         // the single line shown: exactly what gets pasted
     let slot: Int?           // pinned slot for the ⌘n badge
     let image: NSImage?      // clip thumbnail
 
