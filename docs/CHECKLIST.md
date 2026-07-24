@@ -20,13 +20,18 @@ it as milestones land. See [PRD.md](PRD.md) and [PLAN.md](PLAN.md) for the full 
 | Milestone | Code | Verified | Notes |
 |-----------|------|----------|-------|
 | M0 Skeleton | ✅ | ✅ | Runs as `UIElement`, no Dock icon, menu bar quit works |
-| M1 Hotkey | ✅ | ⏳ | Needs a real Cmd+Opt+V press from another app |
-| M2 Panel | ✅ | ⏳ | Needs visual confirmation panel shows without stealing focus |
-| M3 Monitor + list | ✅ | ⏳ | Needs copy→hotkey→arrow→Enter→⌘V round trip |
-| M4 Auto-paste | ✅ | ⏳ | **Go/no-go.** Needs Accessibility grant + paste into a terminal |
-| M5 Snippets | ✅ | ⏳ | Needs Cmd+1 → "Master Schedule of Works" in terminal |
+| M1 Hotkey | ✅ | ✅ | Cmd+Opt+V toggles the picker from another app, no perms dialog |
+| M2 Panel | ✅ | ✅ | Panel drops in, target app keeps focus behind it |
+| M3 Monitor + list | ✅ | ✅ | Capture + live filter + selection confirmed |
+| M4 Auto-paste | ✅ | ✅ | **GO.** ⌘V synthesised into TextEdit + terminal, no manual paste (2026-07-24) |
+| M5 Snippets | ✅ | ✅ | ⌘1 → "Master Schedule of Works" lands in the terminal |
 | M6 History persistence | ⬜ | ⬜ | Not started (in-memory only today) |
-| M7 Polish | 🟡 | ⬜ | Some polish already in (settings, launch-at-login, secure-input notice) |
+| M7 Polish | 🟡 | 🟡 | Core polish in; remaining items listed below |
+
+> ✅ **M5 reached — this is the complete product.** Core verified end-to-end on
+> 2026-07-24: hotkey → picker → ⌘1 → phrase in the terminal, no manual paste.
+> Remaining before "done": broaden the paste matrix (other terminals/apps),
+> Secure-Input case, clipboard restore, then M6 persistence + M7 polish.
 
 ---
 
@@ -62,8 +67,8 @@ Preferences live in `UserDefaults` for `com.codeagency.unde`.
 - [x] `HotKey.swift`: `RegisterEventHotKey`, static handler table, one installed handler
 - [x] Default combo Cmd+Opt+V, four-char signature `'unde'`, status checked
 - [x] Registration wired in `AppDelegate`, re-registerable from settings
-- [ ] **Verify:** press Cmd+Opt+V from another app → picker toggles (INV-1)
-- [ ] **Verify:** no permission dialog appeared for the hotkey alone (INV-2)
+- [x] **Verify:** press Cmd+Opt+V from another app → picker toggles (INV-1)
+- [x] **Verify:** no permission dialog appeared for the hotkey alone (INV-2)
 
 ## M2 — Panel — code-complete
 
@@ -71,7 +76,7 @@ Preferences live in `UserDefaults` for `com.codeagency.unde`.
 - [x] Built once in `PickerController`, shown via `orderFrontRegardless`+`makeKey`, hidden via `orderOut`
 - [x] Positioned on display under cursor, centred, upper third (INV-5)
 - [x] Dismiss: Escape, click-outside/resignKey, hotkey-again toggle (INV-4/INV-6)
-- [ ] **Verify:** frontmost app stays active-looking while panel is up (INV-3)
+- [x] **Verify:** frontmost app stays active-looking while panel is up (INV-3)
 - [ ] **Verify:** appears over full-screen apps and on the cursor's display
 
 ## M3 — Monitor + list (in memory) — code-complete
@@ -85,7 +90,7 @@ Preferences live in `UserDefaults` for `com.codeagency.unde`.
 - [x] SwiftUI list matching Nocturne design (dark, purple accent), selection via event monitor
 - [x] Up/Down + Ctrl+N/Ctrl+P navigation (SEL-2)
 - [x] Row: preview, source classification, relative timestamp; image thumbnails (SEL-5/6)
-- [ ] **Verify:** copy 3 things → hotkey → arrow → Enter → ⌘V lands correct text
+- [x] **Verify:** copy → hotkey → filter/arrow → select → correct text lands
 
 ## M4 — Auto-paste ⭐ go/no-go — code-complete
 
@@ -96,8 +101,8 @@ Preferences live in `UserDefaults` for `com.codeagency.unde`.
 - [x] Secure Input: `IsSecureEventInputEnabled()` check, notice instead of silent fail (SEC-1/2)
 - [x] Best-effort naming of Secure-Input holder (SEC-3)
 - [x] Shift+Enter plain text, Cmd+Enter copy-without-paste (PST-6/7)
-- [ ] **Verify (P0):** hotkey → Enter → text appears in **Terminal.app** with no manual keypress
-- [ ] **Verify:** same in iTerm2, Ghostty, VS Code, Safari address bar, Notes/TextEdit
+- [x] **Verify (P0):** hotkey → select → text appears in a terminal with no manual keypress
+- [~] **Verify:** same in iTerm2, Ghostty, VS Code, Safari address bar, Notes/TextEdit — *TextEdit + one terminal confirmed; broaden the rest*
 - [ ] **Verify:** toggle Secure Keyboard Entry in Terminal → notice shown, not silence
 - [ ] **Verify:** previous clipboard restored ~500ms after paste
 
@@ -108,7 +113,7 @@ Preferences live in `UserDefaults` for `com.codeagency.unde`.
 - [x] Cmd+1…Cmd+9 select by slot, before filter accumulation (SEL-3)
 - [x] Cmd+P promotes selected history item to snippet, lowest free slot (SNP-1)
 - [x] Settings Snippets pane: add/edit/delete, slot assignment (SNP-2/4)
-- [ ] **Verify (headline):** Cmd+Opt+V → Cmd+1 → "Master Schedule of Works" in the terminal
+- [x] **Verify (headline):** Cmd+Opt+V → Cmd+1 → "Master Schedule of Works" in the terminal ✅
 - [ ] **Verify:** time the full round trip; snippets survive relaunch
 
 > **STOP-AND-DOGFOOD POINT.** M5 is the complete product. Use it for a week
@@ -145,12 +150,12 @@ Preferences live in `UserDefaults` for `com.codeagency.unde`.
 
 | Target app | Enter pastes | Cmd+1 snippet | Secure Input notice |
 |-----------|:---:|:---:|:---:|
-| Terminal.app | ⬜ | ⬜ | ⬜ (toggle Secure Keyboard Entry) |
+| Terminal.app | ✅ | ✅ | ⬜ (toggle Secure Keyboard Entry) |
 | iTerm2 | ⬜ | ⬜ | ⬜ |
 | Ghostty | ⬜ | ⬜ | — |
 | VS Code | ⬜ | ⬜ | — |
 | Safari address bar | ⬜ | ⬜ | — |
-| Notes / TextEdit | ⬜ | ⬜ | — |
+| Notes / TextEdit | ✅ | ✅ | — |
 | Focused password field | n/a | n/a | ⬜ |
 
 ## Performance budgets to verify (PRD §7)
