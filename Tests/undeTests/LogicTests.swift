@@ -81,6 +81,63 @@ final class LogicTests: XCTestCase {
         XCTAssertEqual(store.items.last?.text, "item-7")
     }
 
+    // MARK: Retention window (age eviction)
+
+    /// A fixed clock so the tests don't depend on the wall clock.
+    private let clock = Date(timeIntervalSince1970: 1_700_000_000)
+    private func daysAgo(_ n: Double, from now: Date) -> Date {
+        now.addingTimeInterval(-n * 86_400)
+    }
+
+    func testRetentionEvictsItemsOlderThanCutoff() {
+        let store = HistoryStore(capacity: 10)
+        // Insert while retention is off, so nothing is pruned during setup.
+        store.insert(.text("stale", source: nil, at: daysAgo(10, from: clock)))
+        store.insert(.text("fresh", source: nil, at: clock))
+
+        store.retentionCutoff = { [clock] in self.daysAgo(7, from: clock) }
+        store.evictExpired()
+
+        XCTAssertEqual(store.items.map(\.text), ["fresh"])
+    }
+
+    func testRetentionOffKeepsEverything() {
+        let store = HistoryStore(capacity: 10)
+        store.insert(.text("old", source: nil, at: daysAgo(365, from: clock)))
+        store.insert(.text("new", source: nil, at: clock))
+
+        // Default cutoff provider returns nil ("Forever") — no eviction.
+        store.evictExpired()
+
+        XCTAssertEqual(store.items.count, 2)
+    }
+
+    func testRecopyRescuesItemFromExpiry() {
+        let store = HistoryStore(capacity: 10)
+        store.insert(.text("keep", source: nil, at: daysAgo(10, from: clock)))
+        // Re-copying bumps createdAt to now (dedup path), resetting its clock.
+        store.insert(.text("keep", source: nil, at: clock))
+        XCTAssertEqual(store.items.first?.createdAt, clock)
+
+        store.retentionCutoff = { [clock] in self.daysAgo(7, from: clock) }
+        store.evictExpired()
+
+        // No longer stale, so it survives the sweep.
+        XCTAssertEqual(store.items.map(\.text), ["keep"])
+    }
+
+    func testRetentionCutoffIsNilWhenForever() {
+        let prefs = Preferences()
+        let original = prefs.retentionDays
+        defer { prefs.retentionDays = original }
+
+        prefs.retentionDays = 0
+        XCTAssertNil(prefs.retentionCutoff(now: clock))
+
+        prefs.retentionDays = 7
+        XCTAssertEqual(prefs.retentionCutoff(now: clock), daysAgo(7, from: clock))
+    }
+
     // MARK: Exclusion matching
 
     func testExclusionMatching() {

@@ -28,6 +28,7 @@ final class Preferences {
 
     private enum Key {
         static let historyCapacity = "historyCapacity"
+        static let retentionDays = "retentionDays"
         static let restorePasteboard = "restorePasteboard"
         static let restoreDelayMS = "restoreDelayMS"
         static let hotKey = "hotKeyCombo"
@@ -65,6 +66,21 @@ final class Preferences {
     var historyCapacity: Int {
         get { max(100, min(2000, defaults.integer(forKey: Key.historyCapacity))) }
         set { defaults.set(newValue, forKey: Key.historyCapacity) }
+    }
+
+    /// How many days of history to keep; `0` means forever (RET-1, RET-2). Age
+    /// eviction is off by default — an absent key reads as 0 — so a version update
+    /// never silently drops history the user didn't ask to lose. The other allowed
+    /// values (1, 7, 30, 90) are offered by the Settings picker.
+    var retentionDays: Int {
+        get { defaults.integer(forKey: Key.retentionDays) }
+        set { defaults.set(newValue, forKey: Key.retentionDays) }
+    }
+
+    /// The instant before which history items are considered expired, or nil when
+    /// retention is off ("Forever"). Callers evict everything older than this.
+    func retentionCutoff(now: Date = Date()) -> Date? {
+        retentionDays > 0 ? now.addingTimeInterval(-Double(retentionDays) * 86_400) : nil
     }
 
     var restorePasteboard: Bool {

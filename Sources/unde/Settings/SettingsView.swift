@@ -8,21 +8,27 @@ import AppKit
 struct SettingsView: View {
     let prefs: Preferences
     let onHotKeyChange: (KeyCombo) -> Void
+    let onRetentionChange: (Int) -> Void
 
     @State private var showPreview: Bool
     @State private var combo: KeyCombo
     @State private var recording = false
     @State private var uiScale: Double
     @State private var fileMode: FileCaptureMode
+    @State private var retentionDays: Int
     private var recorderMonitor = RecorderMonitor()
 
-    init(prefs: Preferences, onHotKeyChange: @escaping (KeyCombo) -> Void) {
+    init(prefs: Preferences,
+         onHotKeyChange: @escaping (KeyCombo) -> Void,
+         onRetentionChange: @escaping (Int) -> Void) {
         self.prefs = prefs
         self.onHotKeyChange = onHotKeyChange
+        self.onRetentionChange = onRetentionChange
         _showPreview = State(initialValue: prefs.showPreview)
         _combo = State(initialValue: prefs.hotKeyCombo)
         _uiScale = State(initialValue: prefs.uiScale)
         _fileMode = State(initialValue: prefs.fileCaptureMode)
+        _retentionDays = State(initialValue: prefs.retentionDays)
     }
 
     var body: some View {
@@ -49,6 +55,15 @@ struct SettingsView: View {
                     Text("Ignore").tag(FileCaptureMode.ignore)
                 }
                 .onChange(of: fileMode) { prefs.fileCaptureMode = $0 }
+
+                Picker("Keep history for", selection: $retentionDays) {
+                    Text("Forever").tag(0)
+                    Text("1 day").tag(1)
+                    Text("7 days").tag(7)
+                    Text("30 days").tag(30)
+                    Text("90 days").tag(90)
+                }
+                .onChange(of: retentionDays) { onRetentionChange($0) }
             }
 
             Section("Appearance") {

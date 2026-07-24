@@ -117,6 +117,20 @@ final class HistoryRepository {
             """, [.int(Int64(capacity))])
     }
 
+    /// Evict every item older than `cutoff`, cleaning up their image files (RET-3).
+    /// The age sibling of `evict(keeping:)`; `created_at` is indexed, so the scan
+    /// is cheap even at the 2000-item ceiling.
+    func evict(olderThan cutoff: Date) {
+        let ts = cutoff.timeIntervalSince1970
+        let doomed = (try? db.query(
+            "SELECT image_path FROM history_item WHERE created_at < ?;",
+            [.double(ts)]) { $0.text(0) }) ?? []
+        for path in doomed.compactMap({ $0 }) {
+            imageStore.delete(path: path)
+        }
+        try? db.execute("DELETE FROM history_item WHERE created_at < ?;", [.double(ts)])
+    }
+
     // MARK: Helpers
 
     private static func kindString(_ kind: ClipboardItem.Kind) -> String {

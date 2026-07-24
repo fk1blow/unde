@@ -32,6 +32,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Data layer.
         snippetStore = SnippetStore()
         history = HistoryStore(capacity: prefs.historyCapacity, repository: historyRepo)
+        // Age-based retention: the store asks prefs for the current cutoff on every
+        // prune. Run one pass now, after the warm-load, so a stale item is gone at
+        // launch and not only after the next copy (RET-5).
+        history.retentionCutoff = { [prefs] in prefs.retentionCutoff() }
+        history.evictExpired()
 
         // Paste engine + capture. The paster tells the monitor which pasteboard
         // change counts it caused, so we never re-capture our own writes (CAP-7).
@@ -87,10 +92,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return dir.appendingPathComponent("unde.sqlite")
     }
 
+    /// Persist a new retention window and prune immediately, so shortening it
+    /// applies at once (RET-9). Setting "Forever" (0) just stops future eviction.
+    func updateRetention(_ days: Int) {
+        prefs.retentionDays = days
+        history.evictExpired()
+    }
+
     private func openSettings() {
         SettingsWindowController.shared.show(
             prefs: prefs,
-            onHotKeyChange: { [weak self] combo in self?.updateHotKey(combo) }
+            onHotKeyChange: { [weak self] combo in self?.updateHotKey(combo) },
+            onRetentionChange: { [weak self] days in self?.updateRetention(days) }
         )
     }
 }
