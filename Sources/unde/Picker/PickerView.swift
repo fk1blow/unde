@@ -190,15 +190,38 @@ struct PickerView: View {
         return nil
     }
 
-    /// If the text is SVG markup and the system can rasterise it, return the
-    /// rendered image; otherwise nil (so it falls back to a text preview).
+    /// If the text is SVG markup, decode it and rasterise to a bitmap that
+    /// SwiftUI can draw. Returns nil (→ text preview) if it isn't SVG or can't be
+    /// decoded. NSImage decodes SVG as a *vector* rep which SwiftUI's Image won't
+    /// render, so we draw it into a high-res bitmap first.
     private static func renderSVG(_ s: String) -> NSImage? {
         let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
         guard t.hasPrefix("<"), t.contains("<svg"), t.contains("</svg>") else { return nil }
         guard let data = t.data(using: .utf8),
-              let image = NSImage(data: data),
-              image.isValid, image.size.width > 0, image.size.height > 0 else { return nil }
-        return image
+              let vector = NSImage(data: data),
+              vector.isValid, vector.size.width > 0, vector.size.height > 0 else { return nil }
+        return rasterize(vector, scale: 3)
+    }
+
+    /// Draw an image (e.g. a vector SVG) into an off-screen bitmap at `scale`× its
+    /// point size, so the result is a plain bitmap NSImage SwiftUI can display.
+    private static func rasterize(_ image: NSImage, scale: CGFloat) -> NSImage? {
+        let w = image.size.width, h = image.size.height
+        guard w > 0, h > 0,
+              let rep = NSBitmapImageRep(
+                bitmapDataPlanes: nil, pixelsWide: Int(w * scale), pixelsHigh: Int(h * scale),
+                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)
+        else { return nil }
+        rep.size = NSSize(width: w, height: h)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        image.draw(in: NSRect(x: 0, y: 0, width: w, height: h),
+                   from: .zero, operation: .sourceOver, fraction: 1)
+        NSGraphicsContext.restoreGraphicsState()
+        let out = NSImage(size: NSSize(width: w, height: h))
+        out.addRepresentation(rep)
+        return out
     }
 
     /// A detached card, floating to the right of the main panel, whose contents
