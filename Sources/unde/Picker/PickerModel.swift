@@ -4,7 +4,7 @@ import SwiftUI
 /// A single row rendered in the picker — either a pinned snippet or a clipboard
 /// history item, flattened to what the view needs to draw.
 struct DisplayRow: Identifiable {
-    enum Kind { case pinned, clip }
+    enum Kind { case pinned, clip, suggestion }
 
     let id: String
     let kind: Kind
@@ -17,6 +17,24 @@ struct DisplayRow: Identifiable {
     // Backing data for the action layer.
     let snippet: Snippet?
     let clip: ClipboardItem?
+
+    /// For a `.suggestion` row: the scope its token completes to (FLT-5).
+    var scopeToken: QueryScope? = nil
+
+    /// A token-autocomplete row shown while the user is typing a partial `#…`.
+    static func suggestion(_ scope: QueryScope) -> DisplayRow {
+        DisplayRow(
+            id: "tok-\(scope.rawValue)",
+            kind: .suggestion,
+            text: scope.suggestionLabel,
+            meta: scope.suggestionHint,
+            slot: nil,
+            image: nil,
+            snippet: nil,
+            clip: nil,
+            scopeToken: scope
+        )
+    }
 
     /// True when this row is a captured file reference.
     var isFile: Bool { clip?.kind == .file }
@@ -45,6 +63,15 @@ final class PickerModel: ObservableObject {
     @Published var anchor: Int = 0
     @Published var pinnedRows: [DisplayRow] = []
     @Published var clipRows: [DisplayRow] = []
+    /// Token-autocomplete rows shown *instead of* results while the user is typing
+    /// a partial `#…` scope token (FLT-5). Non-empty ⇒ "completing" mode.
+    @Published var suggestionRows: [DisplayRow] = []
+    /// The active kind scope, or nil when unscoped. Drives the pill in the search
+    /// row and the scope-aware count/empty labels.
+    @Published var scope: QueryScope? = nil
+    /// The residual fuzzy text after the scope token is stripped — what the search
+    /// row draws next to the pill (so it shows "foo", not "#image foo").
+    @Published var queryText: String = ""
     @Published var accessibilityTrusted: Bool = true
 
     /// Whether the detached preview card is allowed to appear (SET pref). When
@@ -68,9 +95,15 @@ final class PickerModel: ObservableObject {
     /// false and scrolls the selection into view as before.
     var suppressAutoScroll: Bool = false
 
-    var allRows: [DisplayRow] { pinnedRows + clipRows }
+    /// True while the picker is showing token suggestions rather than results.
+    var isCompleting: Bool { !suggestionRows.isEmpty }
+
+    /// The navigable rows: the suggestion list while completing, else the results.
+    /// Selection, count and commit all key off this, so nothing else needs to know
+    /// which mode the picker is in.
+    var allRows: [DisplayRow] { isCompleting ? suggestionRows : pinnedRows + clipRows }
     var isEmpty: Bool { pinnedRows.isEmpty && clipRows.isEmpty }
-    var count: Int { pinnedRows.count + clipRows.count }
+    var count: Int { allRows.count }
 
     /// The inclusive, contiguous range of currently-selected rows (a single row
     /// when `anchor == selection`).
@@ -88,10 +121,19 @@ final class PickerModel: ObservableObject {
     }
 
     var countLabel: String {
+        if isCompleting { return "\(count) \(count == 1 ? "filter" : "filters")" }
         if isMultiSelecting {
             return "\(selectionRange.count) selected"
         }
         let n = count
+        if let scope { return "\(n) \(scope.countNoun(n))" }
         return "\(n) \(n == 1 ? "result" : "results")"
+    }
+
+    /// The message shown when a query (or scope) matches nothing. Names the scope
+    /// so an empty `#image` reads "No images", not a generic miss (FLT-7).
+    var emptyMessage: String {
+        if let scope { return "No \(scope.pluralNoun)" }
+        return "No matches for “\(queryText)”"
     }
 }
