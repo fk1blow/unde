@@ -29,9 +29,27 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     private func configureButton() {
         if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "doc.on.clipboard", accessibilityDescription: "unde")
-            button.image?.isTemplate = true
+            button.image = Self.brandIcon()
         }
+    }
+
+    /// The "unde" brand mark for the menu bar, as a template image the system
+    /// tints to match the menu bar's light/dark appearance. Falls back to an SF
+    /// Symbol if the bundled asset can't be loaded.
+    private static func brandIcon() -> NSImage {
+        if let url = Bundle.main.url(forResource: "MenuBarIcon", withExtension: "png"),
+           let image = NSImage(contentsOf: url), image.size.height > 0 {
+            // 17pt tall so the "u" matches the visual size of neighbouring
+            // menu-bar glyphs (its letter body lines up; the serif just reads
+            // slightly heavier).
+            let height: CGFloat = 17
+            image.size = NSSize(width: height * (image.size.width / image.size.height), height: height)
+            image.isTemplate = true
+            return image
+        }
+        let fallback = NSImage(systemSymbolName: "doc.on.clipboard", accessibilityDescription: "unde") ?? NSImage()
+        fallback.isTemplate = true
+        return fallback
     }
 
     private func buildMenu() {
@@ -71,12 +89,13 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         guard let button = statusItem.button else { return }
         if SecureInput.isEnabled {
             button.image = NSImage(systemSymbolName: "lock.doc", accessibilityDescription: "unde — Secure Input active")
+            button.image?.isTemplate = true
         } else if prefs.paused {
             button.image = NSImage(systemSymbolName: "pause.circle", accessibilityDescription: "unde — paused")
+            button.image?.isTemplate = true
         } else {
-            button.image = NSImage(systemSymbolName: "doc.on.clipboard", accessibilityDescription: "unde")
+            button.image = Self.brandIcon()
         }
-        button.image?.isTemplate = true
     }
 
     // MARK: Menu updates
