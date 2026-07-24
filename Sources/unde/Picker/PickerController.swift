@@ -161,7 +161,7 @@ final class PickerController: NSObject, NSWindowDelegate {
             DisplayRow(
                 id: "c-\(item.id)",
                 kind: .clip,
-                text: item.preview.isEmpty ? "Image" : item.preview,
+                text: item.rowLabel,
                 slot: nil,
                 image: item.resolvedImage(using: imageStore),
                 snippet: nil,

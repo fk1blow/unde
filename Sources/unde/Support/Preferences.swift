@@ -28,6 +28,7 @@ final class Preferences {
         static let excludedBundleIDs = "excludedBundleIDs"
         static let launchAtLogin = "launchAtLogin"
         static let skipSecrets = "skipSecrets"
+        static let showPreview = "showPreview"
     }
 
     init() {
@@ -36,6 +37,7 @@ final class Preferences {
             Key.restorePasteboard: true,
             Key.restoreDelayMS: 500,
             Key.paused: false,
+            Key.showPreview: true,
             Key.excludedBundleIDs: [
                 "com.apple.keychainaccess",
                 "com.agilebits.onepassword7",
@@ -79,6 +81,12 @@ final class Preferences {
     var skipSecrets: Bool {
         get { defaults.bool(forKey: Key.skipSecrets) }
         set { defaults.set(newValue, forKey: Key.skipSecrets) }
+    }
+
+    /// Show the detached preview card beside the picker. On by default.
+    var showPreview: Bool {
+        get { defaults.bool(forKey: Key.showPreview) }
+        set { defaults.set(newValue, forKey: Key.showPreview) }
     }
 
     var excludedBundleIDs: Set<String> {

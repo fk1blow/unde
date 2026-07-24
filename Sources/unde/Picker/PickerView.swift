@@ -12,6 +12,12 @@ struct PickerView: View {
     /// Called when the pointer enters a row, with its global index.
     var onHoverRow: (Int) -> Void
 
+    /// Measured natural height of the text preview, so its card hugs the content
+    /// instead of standing at a fixed box height.
+    @State private var textPreviewHeight: CGFloat = 0
+    /// Past this the text preview stops growing and scrolls instead.
+    private static let textPreviewMaxHeight: CGFloat = 320
+
     // Layout — the window holds the main card and, when there's something worth
     // showing, a detached preview card floating to its right across a transparent
     // gap. `windowWidth` must match `PickerController.panelWidth`.
@@ -136,14 +142,6 @@ struct PickerView: View {
         case color(String)   // a hex string like "#FF00FF"
         case image(DisplayRow)
         case text(String)    // multi-line or long-enough-to-be-truncated text
-
-        var header: String {
-            switch self {
-            case .color: return "Color preview"
-            case .image: return "Image preview"
-            case .text:  return "Preview"
-            }
-        }
     }
 
     /// The single-line row can hold roughly this many characters before it
@@ -160,58 +158,44 @@ struct PickerView: View {
     }
 
     /// A detached card, floating to the right of the main panel, whose contents
-    /// depend on the selection's type.
+    /// depend on the selection's type. No title — the content speaks for itself.
     private func previewCard(_ kind: PreviewKind) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(kind.header.uppercased())
-                .font(.system(size: 10.5, weight: .semibold))
-                .tracking(1.2)
-                .foregroundColor(Theme.neutral600)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 13)
-            Divider().overlay(Theme.divider)
-            previewBody(kind)
-                .padding(16)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.surface)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.radiusPanel, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.radiusPanel, style: .continuous)
-                .strokeBorder(Theme.neutral500.opacity(0.5), lineWidth: 1)
-        )
-        .fixedSize(horizontal: false, vertical: true)
+        previewBody(kind)
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.surface)
+            .clipShape(RoundedRectangle(cornerRadius: Theme.radiusPanel, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.radiusPanel, style: .continuous)
+                    .strokeBorder(Theme.neutral500.opacity(0.5), lineWidth: 1)
+            )
+            .fixedSize(horizontal: false, vertical: true)
     }
+
+    // Content area width inside the preview card (card width minus 16pt padding
+    // each side).
+    private static let previewContentWidth: CGFloat = previewWidth - 32
+    private static let imagePreviewMaxHeight: CGFloat = 260
 
     @ViewBuilder
     private func previewBody(_ kind: PreviewKind) -> some View {
         switch kind {
         case .color(let hex):
-            VStack(alignment: .leading, spacing: 12) {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color(hexString: hex) ?? .clear)
-                    .frame(height: 150)
-                    .frame(maxWidth: .infinity)
-                Text(hex)
-                    .font(.system(size: 14, weight: .medium, design: .monospaced))
-                    .foregroundColor(Theme.text)
-            }
+            // Just the swatch — the hex value is already shown in the row.
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color(hexString: hex) ?? .clear)
+                .frame(width: Self.previewContentWidth, height: 150)
         case .image(let row):
-            VStack(alignment: .leading, spacing: 10) {
-                if let image = row.image {
-                    Image(nsImage: image)
-                        .resizable()
-                        .interpolation(.medium)
-                        .aspectRatio(contentMode: .fit)
-                        .frame(maxWidth: .infinity)
-                        .frame(maxHeight: 220)
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                }
-                if let clip = row.clip, let w = clip.imageWidth, let h = clip.imageHeight {
-                    Text("\(w) × \(h)")
-                        .font(.system(size: 12))
-                        .foregroundColor(Theme.neutral500)
-                }
+            // Just the image, sized to an exact fit box so the card hugs it — no
+            // dimensions caption (that's in the row).
+            if let image = row.image {
+                let size = Self.imageFitSize(row)
+                Image(nsImage: image)
+                    .resizable()
+                    .interpolation(.medium)
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: size.width, height: size.height)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
         case .text(let full):
             ScrollView {
@@ -220,9 +204,27 @@ struct PickerView: View {
                     .foregroundColor(Theme.text)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(GeometryReader { geo in
+                        Color.clear.preference(key: TextHeightKey.self, value: geo.size.height)
+                    })
             }
-            .frame(maxHeight: 300)
+            // Hug the measured text height, capping (and scrolling) past the max.
+            .frame(height: min(max(textPreviewHeight, 1), Self.textPreviewMaxHeight))
+            .onPreferenceChange(TextHeightKey.self) { textPreviewHeight = $0 }
         }
+    }
+
+    /// The exact display size for an image preview: scaled to fit the content
+    /// width and max height while preserving aspect ratio, so the card hugs it
+    /// with no letterbox or reserved min-height.
+    private static func imageFitSize(_ row: DisplayRow) -> CGSize {
+        let w = CGFloat(row.clip?.imageWidth ?? 0)
+        let h = CGFloat(row.clip?.imageHeight ?? 0)
+        guard w > 0, h > 0 else {
+            return CGSize(width: previewContentWidth, height: 180)
+        }
+        let scale = min(previewContentWidth / w, imagePreviewMaxHeight / h)
+        return CGSize(width: (w * scale).rounded(), height: (h * scale).rounded())
     }
 
     /// Recognise a bare 3- or 6-digit hex colour (with leading `#`), so colours
@@ -310,6 +312,14 @@ struct PickerView: View {
                 .font(.system(size: 11))
                 .foregroundColor(Theme.neutral600)
         }
+    }
+}
+
+/// Reports the natural height of the text preview's content up the view tree.
+private struct TextHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 

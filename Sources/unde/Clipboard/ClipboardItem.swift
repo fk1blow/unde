@@ -45,6 +45,31 @@ struct ClipboardItem: Identifiable, Equatable {
         }
     }
 
+    /// The single-line label shown in a picker row. Text items show their
+    /// preview; images have no filename (they're stored under a content hash), so
+    /// describe them by dimensions and size instead of a bare "Image".
+    var rowLabel: String {
+        switch kind {
+        case .text:
+            return preview
+        case .image:
+            var parts: [String] = []
+            if let w = imageWidth, let h = imageHeight, w > 0, h > 0 {
+                parts.append("\(w) × \(h)")
+            }
+            if byteSize > 0 {
+                parts.append(Self.formattedByteSize(byteSize))
+            }
+            return parts.isEmpty ? "Image" : "Image  ·  " + parts.joined(separator: "  ·  ")
+        }
+    }
+
+    static func formattedByteSize(_ bytes: Int) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: Int64(bytes))
+    }
+
     /// A short human classification shown in the row meta line.
     var classification: String {
         guard kind == .text, let t = text else { return "image" }
