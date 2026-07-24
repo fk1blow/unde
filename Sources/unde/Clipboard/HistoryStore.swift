@@ -11,6 +11,11 @@ final class HistoryStore: ObservableObject {
     private let capacity: Int
     private let repository: HistoryRepository?
 
+    /// Supplies the current retention cutoff, or nil when retention is off
+    /// ("Forever"). Injected by the owner so the store stays free of a
+    /// `Preferences` dependency. Defaults to "never expire".
+    var retentionCutoff: () -> Date? = { nil }
+
     init(capacity: Int, repository: HistoryRepository? = nil) {
         self.capacity = capacity
         self.repository = repository
@@ -24,6 +29,9 @@ final class HistoryStore: ObservableObject {
     /// an existing item moves it to the top rather than adding a duplicate row
     /// (CAP-5). Evicts the oldest beyond the cap (STO-2). Mirrors both to disk.
     func insert(_ item: ClipboardItem) {
+        // Prune anything that has aged out before adding — the "you're actively
+        // copying, so the pass runs" path (RET-5). The fresh item is never caught.
+        evictExpired()
         if let existing = items.firstIndex(where: { $0.id == item.id }) {
             var bumped = items.remove(at: existing)
             bumped.createdAt = item.createdAt
@@ -51,6 +59,19 @@ final class HistoryStore: ObservableObject {
         guard !ids.isEmpty else { return }
         items.removeAll { ids.contains($0.id) }
         ids.forEach { repository?.delete(hash: $0) }
+    }
+
+    /// Drop items older than the retention window (RET-3), both in memory and on
+    /// disk. No-op when retention is off. Only republishes `items` when something
+    /// actually changed, so calling it on every insert costs no spurious UI refresh
+    /// — and since the in-memory list is the newest `capacity` rows, an unchanged
+    /// list means the on-disk set (trimmed to the same cap) has nothing older either.
+    func evictExpired() {
+        guard let cutoff = retentionCutoff() else { return }
+        let survivors = items.filter { $0.createdAt >= cutoff }
+        guard survivors.count != items.count else { return }
+        items = survivors
+        repository?.evict(olderThan: cutoff)
     }
 
     func clear() {
