@@ -34,7 +34,13 @@ final class PickerController: NSObject, NSWindowDelegate {
         let view = PickerView(
             model: model,
             onClickRow: { [weak self] index in self?.commit(at: index, mode: .pasteInPlace) },
-            onHoverRow: { [weak self] index in self?.model.selection = index }
+            onHoverRow: { [weak self] index in
+                guard let self else { return }
+                // Hover-driven selection: highlight the row but don't scroll the
+                // list under the pointer.
+                self.model.suppressAutoScroll = true
+                self.model.selection = index
+            }
         )
         hostingView = NSHostingView(rootView: view)
         panel.contentView = hostingView
@@ -70,10 +76,10 @@ final class PickerController: NSObject, NSWindowDelegate {
         model.accessibilityTrusted = Permissions.isAccessibilityTrusted
         rebuildRows()
 
-        // Size the panel to its content, then place it on the display under the
-        // cursor, centred horizontally, in the upper third (INV-5).
-        hostingView.layoutSubtreeIfNeeded()
-        let size = hostingView.fittingSize
+        // Fixed, modest panel size — never asks SwiftUI for its size (whose
+        // ScrollView fittingSize under-reported and produced an occasional
+        // too-small panel). The list fills the space and scrolls for overflow.
+        let size = NSSize(width: Self.panelWidth, height: Self.panelHeight)
         panel.setContentSize(size)
         positionPanel(size: size)
 
@@ -91,6 +97,10 @@ final class PickerController: NSObject, NSWindowDelegate {
         isVisible = false
         isDismissing = false
     }
+
+    // Fixed panel size — modest, consistent on every open.
+    static let panelWidth: CGFloat = 600
+    static let panelHeight: CGFloat = 420
 
     private func positionPanel(size: NSSize) {
         let mouse = NSEvent.mouseLocation
@@ -162,6 +172,8 @@ final class PickerController: NSObject, NSWindowDelegate {
     private func move(_ delta: Int) {
         let n = model.count
         guard n > 0 else { return }
+        // Keyboard navigation should scroll the selection into view.
+        model.suppressAutoScroll = false
         model.selection = (model.selection + delta + n) % n
     }
 
@@ -229,12 +241,12 @@ final class PickerController: NSObject, NSWindowDelegate {
             // ⌘Delete removes a history item (PRV-3).
             history.remove(id: clip.id)
             rebuildRows()
-        } else if row.snippet != nil {
-            // Pinned snippets are permanent by design (core concept in the PRD):
-            // they are never evicted and are managed deliberately in Settings, not
-            // destroyed by a single keystroke over a default-selected row. Refuse
-            // the delete here and point the user at the right place.
-            NoticePresenter.shared.show("Snippets are permanent — edit or remove them in Settings")
+        } else if let snippet = row.snippet {
+            // ⌘Delete also removes a pinned snippet, immediately — the same
+            // delete the Settings pane performs. The freed slot (1–9) becomes
+            // available again for the next promote; nothing is renumbered.
+            snippets.delete(id: snippet.id)
+            rebuildRows()
         }
     }
 

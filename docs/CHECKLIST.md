@@ -12,7 +12,7 @@ it as milestones land. See [PRD.md](PRD.md) and [PLAN.md](PLAN.md) for the full 
   (not an Xcode project). AppKit shell, SwiftUI rows. Zero third-party runtime.
 - **Deviation from PLAN:** persistence uses the system JSON/SQLite rather than GRDB,
   to keep the build self-contained (no dependency fetch, no audit surface — a value
-  the PLAN itself states). Snippets persist as JSON today; history → SQLite at M6.
+  the PLAN itself states). Snippets persist as JSON; history is SQLite (done at M6).
 - **Legend:** `[x]` done & verified · `[~]` code-complete, not yet verified on-device · `[ ]` not started
 
 ### Milestone status at a glance
@@ -28,10 +28,11 @@ it as milestones land. See [PRD.md](PRD.md) and [PLAN.md](PLAN.md) for the full 
 | M6 History persistence | ✅ | ✅ | SQLite; survives relaunch, dedup via unique index (2026-07-24) |
 | M7 Polish | 🟡 | 🟡 | Core polish in; remaining items listed below |
 
-> ✅ **M5 reached — this is the complete product.** Core verified end-to-end on
-> 2026-07-24: hotkey → picker → ⌘1 → phrase in the terminal, no manual paste.
-> Remaining before "done": broaden the paste matrix (other terminals/apps),
-> Secure-Input case, clipboard restore, then M6 persistence + M7 polish.
+> ✅ **M0–M6 done & verified.** Core verified end-to-end on 2026-07-24: hotkey →
+> picker → ⌘1 → phrase in the terminal, no manual paste; history persists across
+> relaunch. Remaining before "done": broaden the paste matrix (other
+> terminals/apps), Secure-Input case, clipboard restore, and the M7 tail below.
+> See **Session refinements** at the end for post-M5 UX changes from dogfooding.
 
 ---
 
@@ -40,7 +41,8 @@ it as milestones land. See [PRD.md](PRD.md) and [PLAN.md](PLAN.md) for the full 
 ```bash
 cd /Users/dragostudorache/Playground/unde
 swift build                      # fast compile check
-./scripts/build_app.sh release   # assemble build/unde.app + ad-hoc sign
+swift test                       # run the unit suite (13 tests)
+./scripts/build_app.sh release   # assemble build/unde.app + stable-identity sign
 open build/unde.app              # launch (menu bar item appears, no Dock icon)
 pkill -x unde                    # quit
 ```
@@ -95,7 +97,7 @@ Preferences live in `UserDefaults` for `com.codeagency.unde`.
 - [x] `FuzzyMatcher`: subsequence + consecutive/boundary/earlier scoring (SEL-1)
 - [x] SwiftUI list matching Nocturne design (dark, purple accent), selection via event monitor
 - [x] Up/Down + Ctrl+N/Ctrl+P navigation (SEL-2)
-- [x] Row: preview, source classification, relative timestamp; image thumbnails (SEL-5/6)
+- [x] Rows redesigned to a single line = the exact paste payload (see Session refinements); image thumbnails (SEL-6)
 - [x] **Verify:** copy → hotkey → filter/arrow → select → correct text lands
 
 ## M4 — Auto-paste ⭐ go/no-go — code-complete
@@ -147,13 +149,33 @@ Preferences live in `UserDefaults` for `com.codeagency.unde`.
 - [x] Clear-all history with confirmation dialog (PRV-4)
 - [x] Optional secret-pattern filter (JWT/vendor-prefix/high-entropy), off by default (PRV-5)
 - [x] Unit test suite (`swift test`): fuzzy scoring, secret detection, dedup, eviction, classification
+- [x] Stable-identity signing so the Accessibility grant persists across rebuilds
 - [ ] Pause auto-resume timer (PRV-2)
 - [ ] First-run explanation flow for Accessibility + Secure Keyboard Entry (PST-4, SEC-4)
 - [ ] Persistent denied-Accessibility banner in picker (PST-4)
-- [ ] Source app icons via `NSWorkspace.icon(forFile:)`, cached (SEL-5)
-- [ ] Developer ID signing + notarisation for cross-machine use
+- [~] ~~Source app icons + timestamps in rows (SEL-5)~~ — **CUT for v1**: rows are single-line paste-payload only, by design decision
+- [ ] Developer ID signing + notarisation for cross-machine use (dev signing done; distribution signing pending)
 
 ---
+
+## Session refinements (post-M5, from dogfooding) — 2026-07-24
+
+Changes driven by real use, not in the original PLAN milestones:
+
+- [x] **Single-line rows.** Each row shows exactly the text that will paste — no
+  label/content split, no metadata line. Killed the "which line is which /
+  what am I pasting" confusion. (Supersedes SEL-5's two-line row concept.)
+- [x] **⌘Delete guard.** ⌘⌫ deletes history items only; pinned snippets are
+  permanent and can't be nuked by a stray keystroke on the default-selected row
+  (this bug had silently deleted the slot-1 snippet during testing).
+- [x] **Discoverable pin/delete.** Footer now shows `⌘P pin · ⌘⌫ delete`.
+- [x] **Live-refresh while open.** Picker updates from the stores as you copy, so
+  a just-captured item appears immediately — no reopen needed.
+- [x] **Hover without scroll-chase.** Hovering highlights a row but doesn't
+  re-center the list under the pointer; keyboard nav still scrolls into view.
+- [x] **Fixed panel size (600×420).** Replaced SwiftUI `fittingSize` (which
+  under-reported and produced an occasional too-small window) with a constant.
+- [x] **Stable code signing.** Grant Accessibility once; survives every rebuild.
 
 ## Paste test matrix (run at M4, re-run after any paste-path change)
 

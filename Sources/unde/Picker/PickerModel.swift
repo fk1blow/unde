@@ -27,6 +27,12 @@ final class PickerModel: ObservableObject {
     @Published var clipRows: [DisplayRow] = []
     @Published var accessibilityTrusted: Bool = true
 
+    /// Set true when a selection change comes from the mouse hovering a row, so
+    /// the list does not auto-scroll to re-center under the pointer. Consumed and
+    /// cleared by the list's onChange handler. Keyboard navigation leaves this
+    /// false and scrolls the selection into view as before.
+    var suppressAutoScroll: Bool = false
+
     var allRows: [DisplayRow] { pinnedRows + clipRows }
     var isEmpty: Bool { pinnedRows.isEmpty && clipRows.isEmpty }
     var count: Int { pinnedRows.count + clipRows.count }

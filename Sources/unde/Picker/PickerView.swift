@@ -88,8 +88,15 @@ struct PickerView: View {
                 }
                 .padding(8)
             }
-            .frame(minHeight: 120, maxHeight: 340)
+            .frame(maxHeight: .infinity)
             .onChange(of: model.selection) { newValue in
+                // A hover moved the selection — highlight the row but leave the
+                // scroll position where it is, so the list doesn't chase the
+                // pointer. Keyboard navigation clears the flag and scrolls.
+                if model.suppressAutoScroll {
+                    model.suppressAutoScroll = false
+                    return
+                }
                 withAnimation(.easeOut(duration: 0.08)) {
                     proxy.scrollTo(newValue, anchor: .center)
                 }
@@ -110,7 +117,6 @@ struct PickerView: View {
     private func rowView(_ row: DisplayRow, index: Int) -> some View {
         let active = index == model.selection
         return HStack(spacing: 11) {
-            icon(for: row)
             Text(row.text)
                 .font(.system(size: 14))
                 .foregroundColor(Theme.text)
@@ -139,30 +145,6 @@ struct PickerView: View {
         .contentShape(Rectangle())
         .onTapGesture { onClickRow(index) }
         .onHover { if $0 { onHoverRow(index) } }
-    }
-
-    @ViewBuilder
-    private func icon(for row: DisplayRow) -> some View {
-        switch row.kind {
-        case .pinned:
-            Image(systemName: "pin.fill")
-                .font(.system(size: 12))
-                .foregroundColor(Theme.accent300)
-                .frame(width: 16)
-        case .clip:
-            if let image = row.image {
-                Image(nsImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: 26, height: 20)
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
-            } else {
-                Image(systemName: "clock")
-                    .font(.system(size: 13))
-                    .foregroundColor(Theme.neutral500)
-                    .frame(width: 16)
-            }
-        }
     }
 
     // MARK: Footer
