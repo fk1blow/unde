@@ -319,12 +319,21 @@ final class PickerController: NSObject, NSWindowDelegate {
 
     // MARK: Selection
 
-    private func move(_ delta: Int) {
+    private func move(_ delta: Int, isRepeat: Bool = false) {
         let n = model.count
         guard n > 0 else { return }
         // Keyboard navigation should scroll the selection into view.
         model.suppressAutoScroll = false
-        model.selection = (model.selection + delta + n) % n
+        let next = model.selection + delta
+        if next < 0 || next >= n {
+            // At a boundary. Wrap only on a deliberate fresh press — while the key
+            // is auto-repeating (held down) we clamp, so reaching an end stops there
+            // instead of looping straight past it. Release and press again to wrap.
+            if isRepeat { return }
+            model.selection = (next + n) % n
+        } else {
+            model.selection = next
+        }
         // A plain arrow collapses any multi-selection back to a single row.
         model.anchor = model.selection
     }
@@ -586,9 +595,9 @@ final class PickerController: NSObject, NSWindowDelegate {
             }
             return true
         case kVK_DownArrow:
-            shift ? extend(1) : move(1); return true
+            shift ? extend(1) : move(1, isRepeat: event.isARepeat); return true
         case kVK_UpArrow:
-            shift ? extend(-1) : move(-1); return true
+            shift ? extend(-1) : move(-1, isRepeat: event.isARepeat); return true
         case kVK_Delete: // backspace edits the query
             if option {
                 // ⌥⌫ deletes the previous word of the query (macOS convention).
@@ -604,8 +613,8 @@ final class PickerController: NSObject, NSWindowDelegate {
 
         // Emacs-style navigation.
         if ctrl {
-            if chars == "n" { move(1); return true }
-            if chars == "p" { move(-1); return true }
+            if chars == "n" { move(1, isRepeat: event.isARepeat); return true }
+            if chars == "p" { move(-1, isRepeat: event.isARepeat); return true }
             return false
         }
 

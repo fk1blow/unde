@@ -178,17 +178,25 @@ struct PickerView: View {
                             rowView(row, index: offset)
                         }
                     } else {
+                        // With a scope active, the search-row pill already names the
+                        // category, so the section header would just repeat it — show
+                        // headers only when unscoped.
+                        let showHeaders = model.scope == nil
                         if !model.pinnedRows.isEmpty {
-                            sectionHeader("Pinned snippets")
-                                .id(Self.pinnedHeaderID)
+                            if showHeaders {
+                                sectionHeader("Pinned snippets")
+                                    .id(Self.pinnedHeaderID)
+                            }
                             ForEach(Array(model.pinnedRows.enumerated()), id: \.element.id) { offset, row in
                                 rowView(row, index: offset)
                             }
                         }
                         if !model.clipRows.isEmpty {
-                            sectionHeader("Clipboard history")
-                                .padding(.top, model.pinnedRows.isEmpty ? 0 : 6)
-                                .id(Self.clipHeaderID)
+                            if showHeaders {
+                                sectionHeader("Clipboard history")
+                                    .padding(.top, model.pinnedRows.isEmpty ? 0 : 6)
+                                    .id(Self.clipHeaderID)
+                            }
                             ForEach(Array(model.clipRows.enumerated()), id: \.element.id) { offset, row in
                                 rowView(row, index: model.pinnedRows.count + offset)
                             }
@@ -221,10 +229,12 @@ struct PickerView: View {
                 // When landing on the first row of a section, target the section
                 // header instead of the row, so the label above it is revealed
                 // rather than left clipped at the top edge.
+                // Headers only exist when unscoped; with a scope active, target the
+                // row itself so scrollTo doesn't reference a header that isn't there.
                 let targetID: String
-                if newValue == 0, !model.pinnedRows.isEmpty {
+                if model.scope == nil, newValue == 0, !model.pinnedRows.isEmpty {
                     targetID = Self.pinnedHeaderID
-                } else if newValue == model.pinnedRows.count, !model.clipRows.isEmpty {
+                } else if model.scope == nil, newValue == model.pinnedRows.count, !model.clipRows.isEmpty {
                     targetID = Self.clipHeaderID
                 } else {
                     targetID = rows[newValue].id
