@@ -438,7 +438,11 @@ struct PickerView: View {
             hint("⌘P", "pin")
             hint("⌘⌫", "delete")
             hint("⌘A", "all")
-            hint("⌘1–9", "jump")
+            // Only advertise ⌘n jump when there are pinned slots, sized to how many
+            // actually exist ("⌘1", "⌘1–3") rather than a fixed, mostly-empty ⌘1–9.
+            if let jump = model.jumpHintKey {
+                hint(jump, "jump")
+            }
             // Selection-specific verbs append at the tail as accent chips so they
             // read as extra, contextual actions for this row — distinct from the
             // always-on hints. File rows are the only case today, and they don't

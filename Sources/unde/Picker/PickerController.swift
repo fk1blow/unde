@@ -206,6 +206,9 @@ final class PickerController: NSObject, NSWindowDelegate {
         let parsed = QueryParser.parse(model.query)
         model.scope = parsed.scope
         model.queryText = parsed.text
+        // ⌘1–9 fire against the full ordered list regardless of filter, so the
+        // jump hint reflects the total pinned count, not the filtered rows.
+        model.pinnedSlotCount = snippets.ordered.count
 
         // Typing a partial `#…` token: show the autocomplete list instead of
         // results (FLT-5). Nothing else runs — there are no rows to filter yet.

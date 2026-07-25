@@ -72,6 +72,12 @@ final class PickerModel: ObservableObject {
     /// The residual fuzzy text after the scope token is stripped — what the search
     /// row draws next to the pill (so it shows "foo", not "#image foo").
     @Published var queryText: String = ""
+    /// The total number of pinned snippets (unfiltered), so the footer can show a
+    /// ⌘n jump hint that matches how many slots actually exist. ⌘1–9 fire against
+    /// the full ordered list regardless of the query, so this is deliberately not
+    /// the filtered `pinnedRows.count`.
+    @Published var pinnedSlotCount: Int = 0
+
     @Published var accessibilityTrusted: Bool = true
 
     /// Whether the detached preview card is allowed to appear (SET pref). When
@@ -128,6 +134,17 @@ final class PickerModel: ObservableObject {
         let n = count
         if let scope { return "\(n) \(scope.countNoun(n))" }
         return "\(n) \(n == 1 ? "result" : "results")"
+    }
+
+    /// The footer's ⌘n jump-hint key, sized to the pinned slots that actually
+    /// exist (1–9), or nil when nothing is pinned so the hint can be hidden.
+    var jumpHintKey: String? {
+        let n = min(9, pinnedSlotCount)
+        switch n {
+        case 0:  return nil
+        case 1:  return "⌘1"
+        default: return "⌘1–\(n)"
+        }
     }
 
     /// The message shown when a query (or scope) matches nothing. Names the scope
