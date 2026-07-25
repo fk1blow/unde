@@ -19,6 +19,17 @@ struct KeyCombo: Equatable, Codable {
         keyCode: UInt32(kVK_ANSI_V),
         modifiers: UInt32(cmdKey | optionKey)
     )
+
+    /// The default picker "delete item" shortcut, ⌘D.
+    static let defaultDeleteCombo = KeyCombo(
+        keyCode: UInt32(kVK_ANSI_D),
+        modifiers: UInt32(cmdKey)
+    )
+
+    /// True for Backspace-key combos (⌘⌫, ⌥⌫, ⌫). These stay bound to editing the
+    /// search — ⌘⌫ clears it, ⌥⌫ deletes a word, ⌫ a char — so the delete-item
+    /// shortcut may never shadow them. The recorder rejects any such choice.
+    var isReservedForSearch: Bool { keyCode == UInt32(kVK_Delete) }
 }
 
 /// Thin, typed wrapper over UserDefaults. Every persisted preference lives here
@@ -32,6 +43,7 @@ final class Preferences {
         static let restorePasteboard = "restorePasteboard"
         static let restoreDelayMS = "restoreDelayMS"
         static let hotKey = "hotKeyCombo"
+        static let deleteItemHotKey = "deleteItemHotKey"
         static let didRequestAccessibility = "didRequestAccessibility"
         static let paused = "paused"
         static let excludedBundleIDs = "excludedBundleIDs"
@@ -152,6 +164,23 @@ final class Preferences {
         set {
             if let data = try? JSONEncoder().encode(newValue) {
                 defaults.set(data, forKey: Key.hotKey)
+            }
+        }
+    }
+
+    /// The picker's "delete item" shortcut. Configurable; defaults to ⌘D. Read live
+    /// on each keystroke by the picker, so a change applies with no re-registration.
+    /// Backspace-key combos are rejected at the recorder (see `isReservedForSearch`).
+    var deleteItemHotKey: KeyCombo {
+        get {
+            guard let data = defaults.data(forKey: Key.deleteItemHotKey),
+                  let combo = try? JSONDecoder().decode(KeyCombo.self, from: data)
+            else { return .defaultDeleteCombo }
+            return combo
+        }
+        set {
+            if let data = try? JSONEncoder().encode(newValue) {
+                defaults.set(data, forKey: Key.deleteItemHotKey)
             }
         }
     }

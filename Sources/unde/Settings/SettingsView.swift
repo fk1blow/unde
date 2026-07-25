@@ -3,7 +3,7 @@ import AppKit
 
 /// The settings UI: a single window with grouped sections. Intentionally spare —
 /// this is a personal tool, so it exposes exactly the knobs worth changing.
-///   • General    — show-preview toggle, editable keybinding
+///   • General    — show-preview toggle, summon + delete-item keybindings
 ///   • Appearance — a uniform UI scale for the picker
 struct SettingsView: View {
     let prefs: Preferences
@@ -13,10 +13,13 @@ struct SettingsView: View {
     @State private var showPreview: Bool
     @State private var combo: KeyCombo
     @State private var recording = false
+    @State private var deleteCombo: KeyCombo
+    @State private var recordingDelete = false
     @State private var uiScale: Double
     @State private var fileMode: FileCaptureMode
     @State private var retentionDays: Int
     private var recorderMonitor = RecorderMonitor()
+    private var deleteRecorderMonitor = RecorderMonitor()
 
     init(prefs: Preferences,
          onHotKeyChange: @escaping (KeyCombo) -> Void,
@@ -26,6 +29,7 @@ struct SettingsView: View {
         self.onRetentionChange = onRetentionChange
         _showPreview = State(initialValue: prefs.showPreview)
         _combo = State(initialValue: prefs.hotKeyCombo)
+        _deleteCombo = State(initialValue: prefs.deleteItemHotKey)
         _uiScale = State(initialValue: prefs.uiScale)
         _fileMode = State(initialValue: prefs.fileCaptureMode)
         _retentionDays = State(initialValue: prefs.retentionDays)
@@ -43,6 +47,12 @@ struct SettingsView: View {
                 LabeledContent("Keybinding") {
                     Button(recording ? "Press keys…" : combo.display) {
                         toggleRecording()
+                    }
+                    .frame(minWidth: 110)
+                }
+                LabeledContent("Delete item") {
+                    Button(recordingDelete ? "Press keys…" : deleteCombo.display) {
+                        toggleDeleteRecording()
                     }
                     .frame(minWidth: 110)
                 }
@@ -140,6 +150,29 @@ struct SettingsView: View {
                 prefs.hotKeyCombo = captured
                 onHotKeyChange(captured)
             }
+        }
+    }
+
+    private func toggleDeleteRecording() {
+        if recordingDelete {
+            deleteRecorderMonitor.stop()
+            recordingDelete = false
+            return
+        }
+        recordingDelete = true
+        deleteRecorderMonitor.start { captured in
+            recordingDelete = false
+            deleteRecorderMonitor.stop()
+            guard let captured else { return }
+            // ⌘⌫ (and every Backspace-key combo) is reserved for editing the search,
+            // so it can't be re-bound to delete — the exact trap this setting fixes.
+            if captured.isReservedForSearch {
+                NoticePresenter.shared.show("⌘⌫ clears the search and ⌫ edits it — pick a different key for Delete.")
+                return
+            }
+            deleteCombo = captured
+            prefs.deleteItemHotKey = captured
+            // Read live by the picker from Preferences — no re-registration needed.
         }
     }
 }

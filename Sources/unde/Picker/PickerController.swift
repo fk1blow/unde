@@ -101,6 +101,7 @@ final class PickerController: NSObject, NSWindowDelegate {
         model.accessibilityTrusted = Permissions.isAccessibilityTrusted
         model.showPreview = prefs.showPreview
         model.uiScale = CGFloat(prefs.uiScale)
+        model.deleteHintKey = prefs.deleteItemHotKey.display
         // Force the preview surface to re-measure for this open (re-fires onAppear).
         model.previewGeneration &+= 1
         rebuildRows()
@@ -556,6 +557,13 @@ final class PickerController: NSObject, NSWindowDelegate {
         let code = Int(event.keyCode)
         let chars = event.charactersIgnoringModifiers ?? ""
 
+        // Custom "delete item" shortcut (default ⌘D), matched before the per-modifier
+        // branches so any chosen combo fires. The recorder forbids Backspace-key
+        // combos, so ⌘⌫ can never land here and stays "clear the search" below.
+        if let combo = KeyCombo.from(event: event), combo == prefs.deleteItemHotKey {
+            deleteSelected(); return true
+        }
+
         // Command combinations first — these fire regardless of filter text.
         if cmd {
             if let n = Int(chars), (1...9).contains(n) { pastePinnedSlot(n); return true }
@@ -563,11 +571,15 @@ final class PickerController: NSObject, NSWindowDelegate {
             if chars == "p" { promoteSelected(); return true }
             if chars == "r" { revealSelectedInFinder(); return true }
             if code == kVK_Delete {
-                // ⌘⌫ always deletes the selected row(s) — the gesture the footer
-                // advertises and the payoff of a scoped multi-select (#image · ⌘A ·
-                // ⌘⌫). It must not depend on the query being empty, or a scope/search
-                // would silently turn "delete" into "clear the search box".
-                deleteSelected()
+                // ⌘⌫ clears the search (delete-to-start-of-line), matching macOS
+                // text fields and the reflex they train. Never destructive — item
+                // deletion is the configurable shortcut above (⌘D) plus ⌃X.
+                if !model.query.isEmpty {
+                    model.query = ""
+                    model.selection = 0
+                    model.anchor = 0
+                    rebuildRows()
+                }
                 return true
             }
             if code == kVK_Return || code == kVK_ANSI_KeypadEnter { commitSelected(mode: .copyOnly); return true }
@@ -614,10 +626,12 @@ final class PickerController: NSObject, NSWindowDelegate {
             break
         }
 
-        // Emacs-style navigation.
+        // Emacs-style navigation, plus ⌃X as a fixed delete alias (Raycast parity)
+        // alongside the configurable shortcut above.
         if ctrl {
             if chars == "n" { move(1, isRepeat: event.isARepeat); return true }
             if chars == "p" { move(-1, isRepeat: event.isARepeat); return true }
+            if chars == "x" { deleteSelected(); return true }
             return false
         }
 

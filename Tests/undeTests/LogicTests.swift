@@ -1,4 +1,5 @@
 import XCTest
+import Carbon.HIToolbox
 @testable import unde
 
 /// Unit coverage for the pure logic the PRD test plan calls out: fuzzy scoring
@@ -190,6 +191,22 @@ final class LogicTests: XCTestCase {
         let p = QueryParser.parse("  #IMAGE Logo")
         XCTAssertEqual(p.scope, .image)
         XCTAssertEqual(p.text, "Logo")
+    }
+
+    // MARK: Delete-item shortcut
+
+    func testDeleteShortcutDefaultsToCmdD() {
+        XCTAssertEqual(KeyCombo.defaultDeleteCombo.display, "⌘D")
+    }
+
+    func testBackspaceCombosAreReservedForSearch() {
+        // ⌘⌫ and other Backspace-key combos must be rejected by the recorder so the
+        // "clear search" reflex can never be rebound onto delete.
+        let cmdDelete = KeyCombo(keyCode: UInt32(kVK_Delete), modifiers: UInt32(cmdKey))
+        let optDelete = KeyCombo(keyCode: UInt32(kVK_Delete), modifiers: UInt32(optionKey))
+        XCTAssertTrue(cmdDelete.isReservedForSearch)
+        XCTAssertTrue(optDelete.isReservedForSearch)
+        XCTAssertFalse(KeyCombo.defaultDeleteCombo.isReservedForSearch)
     }
 
     // MARK: Exclusion matching

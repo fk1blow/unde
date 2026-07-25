@@ -436,7 +436,7 @@ struct PickerView: View {
             // footer doesn't reflow as the selection changes.
             hint("⏎", "paste")
             hint("⌘P", "pin")
-            hint("⌘⌫", "delete")
+            hint(model.deleteHintKey, "delete")
             hint("⌘A", "all")
             // Only advertise ⌘n jump when there are pinned slots, sized to how many
             // actually exist ("⌘1", "⌘1–3") rather than a fixed, mostly-empty ⌘1–9.

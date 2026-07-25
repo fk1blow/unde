@@ -80,6 +80,10 @@ final class PickerModel: ObservableObject {
 
     @Published var accessibilityTrusted: Bool = true
 
+    /// The footer's delete-hint key, mirroring the configurable delete shortcut
+    /// (default "⌘D"). Set by the controller from Preferences when the picker opens.
+    @Published var deleteHintKey: String = "⌘D"
+
     /// Whether the detached preview card is allowed to appear (SET pref). When
     /// false, the picker is just the main card regardless of the selection type.
     @Published var showPreview: Bool = true
