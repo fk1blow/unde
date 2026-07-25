@@ -146,7 +146,7 @@ struct PickerView: View {
                     if model.query.isEmpty {
                         Text("Search snippets and clipboard…")
                             .font(.system(size: 17))
-                            .foregroundColor(Theme.neutral500)
+                            .foregroundColor(Theme.neutral600)
                     }
                     HStack(spacing: 1) {
                         Text(model.scope != nil ? model.queryText : model.query)
