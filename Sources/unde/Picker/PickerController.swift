@@ -560,17 +560,11 @@ final class PickerController: NSObject, NSWindowDelegate {
             if chars == "p" { promoteSelected(); return true }
             if chars == "r" { revealSelectedInFinder(); return true }
             if code == kVK_Delete {
-                // While searching, ⌘⌫ clears the query to the start (standard
-                // "delete to beginning of line"). With no query it falls back to
-                // deleting the selected item.
-                if model.query.isEmpty {
-                    deleteSelected()
-                } else {
-                    model.query = ""
-                    model.selection = 0
-                    model.anchor = 0
-                    rebuildRows()
-                }
+                // ⌘⌫ always deletes the selected row(s) — the gesture the footer
+                // advertises and the payoff of a scoped multi-select (#image · ⌘A ·
+                // ⌘⌫). It must not depend on the query being empty, or a scope/search
+                // would silently turn "delete" into "clear the search box".
+                deleteSelected()
                 return true
             }
             if code == kVK_Return || code == kVK_ANSI_KeypadEnter { commitSelected(mode: .copyOnly); return true }
