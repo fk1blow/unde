@@ -575,10 +575,16 @@ final class PickerController: NSObject, NSWindowDelegate {
         case kVK_Escape:
             hide(); return true
         case kVK_Tab:
-            // Tab completes the highlighted token while the autocomplete is showing;
-            // otherwise it has no meaning in the picker.
-            if model.isCompleting { completeSelectedToken(); return true }
-            return false
+            // While the autocomplete is showing, Tab completes the highlighted
+            // token. Otherwise it steps through the list like the arrows —
+            // Tab = next, Shift+Tab = previous — sharing their stop-at-end-on-hold
+            // behaviour so all three navigation keys feel the same.
+            if model.isCompleting {
+                completeSelectedToken()
+            } else {
+                shift ? move(-1, isRepeat: event.isARepeat) : move(1, isRepeat: event.isARepeat)
+            }
+            return true
         case kVK_Return, kVK_ANSI_KeypadEnter:
             if option {
                 // ⌥⏎ pastes a file's path as text (harmless for non-file rows,
