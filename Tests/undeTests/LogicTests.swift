@@ -1,4 +1,5 @@
 import XCTest
+import Carbon.HIToolbox
 @testable import unde
 
 /// Unit coverage for the pure logic the PRD test plan calls out: fuzzy scoring
@@ -136,6 +137,76 @@ final class LogicTests: XCTestCase {
 
         prefs.retentionDays = 7
         XCTAssertEqual(prefs.retentionCutoff(now: clock), daysAgo(7, from: clock))
+    }
+
+    // MARK: Query scope parsing (#-token kind filters)
+
+    func testParsesExactTokenAsScope() {
+        let p = QueryParser.parse("#image report")
+        XCTAssertEqual(p.scope, .image)
+        XCTAssertEqual(p.text, "report")
+        XCTAssertNil(p.completing)
+    }
+
+    func testExactTokenNoSpaceActivatesScope() {
+        let p = QueryParser.parse("#pinned")
+        XCTAssertEqual(p.scope, .pinned)
+        XCTAssertEqual(p.text, "")
+        XCTAssertNil(p.completing)
+    }
+
+    func testPartialTokenSuggests() {
+        let p = QueryParser.parse("#im")
+        XCTAssertNil(p.scope)
+        XCTAssertEqual(p.completing, "#im")
+        XCTAssertEqual(p.suggestions, [.image])
+    }
+
+    func testBareHashSuggestsAllScopes() {
+        let p = QueryParser.parse("#")
+        XCTAssertEqual(p.completing, "#")
+        XCTAssertEqual(Set(p.suggestions), Set(QueryScope.allCases))
+    }
+
+    func testUnknownHashIsLiteralSearch() {
+        // FLT-4: real content starting with `#` is never swallowed.
+        let hex = QueryParser.parse("#ff0000")
+        XCTAssertNil(hex.scope)
+        XCTAssertNil(hex.completing)
+        XCTAssertEqual(hex.text, "#ff0000")
+
+        let unknown = QueryParser.parse("#deploy now")
+        XCTAssertNil(unknown.scope)
+        XCTAssertEqual(unknown.text, "#deploy now")
+    }
+
+    func testUnscopedQueryIsPlainText() {
+        let p = QueryParser.parse("master schedule")
+        XCTAssertNil(p.scope)
+        XCTAssertNil(p.completing)
+        XCTAssertEqual(p.text, "master schedule")
+    }
+
+    func testScopeParsingToleratesLeadingSpaceAndCase() {
+        let p = QueryParser.parse("  #IMAGE Logo")
+        XCTAssertEqual(p.scope, .image)
+        XCTAssertEqual(p.text, "Logo")
+    }
+
+    // MARK: Delete-item shortcut
+
+    func testDeleteShortcutDefaultsToCmdD() {
+        XCTAssertEqual(KeyCombo.defaultDeleteCombo.display, "⌘D")
+    }
+
+    func testBackspaceCombosAreReservedForSearch() {
+        // ⌘⌫ and other Backspace-key combos must be rejected by the recorder so the
+        // "clear search" reflex can never be rebound onto delete.
+        let cmdDelete = KeyCombo(keyCode: UInt32(kVK_Delete), modifiers: UInt32(cmdKey))
+        let optDelete = KeyCombo(keyCode: UInt32(kVK_Delete), modifiers: UInt32(optionKey))
+        XCTAssertTrue(cmdDelete.isReservedForSearch)
+        XCTAssertTrue(optDelete.isReservedForSearch)
+        XCTAssertFalse(KeyCombo.defaultDeleteCombo.isReservedForSearch)
     }
 
     // MARK: Exclusion matching

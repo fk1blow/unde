@@ -101,6 +101,7 @@ final class PickerController: NSObject, NSWindowDelegate {
         model.accessibilityTrusted = Permissions.isAccessibilityTrusted
         model.showPreview = prefs.showPreview
         model.uiScale = CGFloat(prefs.uiScale)
+        model.deleteHintKey = prefs.deleteItemHotKey.display
         // Force the preview surface to re-measure for this open (re-fires onAppear).
         model.previewGeneration &+= 1
         rebuildRows()
@@ -203,13 +204,36 @@ final class PickerController: NSObject, NSWindowDelegate {
     // MARK: Row building
 
     private func rebuildRows() {
-        let query = model.query.trimmingCharacters(in: .whitespaces)
+        let parsed = QueryParser.parse(model.query)
+        model.scope = parsed.scope
+        model.queryText = parsed.text
+        // ⌘1–9 fire against the full ordered list regardless of filter, so the
+        // jump hint reflects the total pinned count, not the filtered rows.
+        model.pinnedSlotCount = snippets.ordered.count
+
+        // Typing a partial `#…` token: show the autocomplete list instead of
+        // results (FLT-5). Nothing else runs — there are no rows to filter yet.
+        if parsed.completing != nil {
+            model.suggestionRows = parsed.suggestions.map { DisplayRow.suggestion($0) }
+            model.pinnedRows = []
+            model.clipRows = []
+            clampSelection()
+            return
+        }
+        model.suggestionRows = []
+
+        let query = parsed.text
+        let scope = parsed.scope
+        // A scope other than #pinned hides the pinned section; #pinned hides history.
+        // Unscoped shows both (the original behaviour).
+        let showPinned = (scope == nil || scope == .pinned)
+        let showClips = (scope == nil || scope != .pinned)
 
         // Pinned snippets: filtered by query but never reordered by it (SEL-4).
         // The ⌘n badge is the snippet's *position* in the ordered list (1–9), not
         // its stored slot — so with two pinned items you always see ⌘1 and ⌘2,
         // never a gap like ⌘3 left behind by a deleted slot.
-        let pinned = snippets.ordered.enumerated().compactMap { index, snippet -> DisplayRow? in
+        let pinned = !showPinned ? [] : snippets.ordered.enumerated().compactMap { index, snippet -> DisplayRow? in
             let matches = query.isEmpty
                 || FuzzyMatcher.matches(query: query, candidate: snippet.title)
                 || FuzzyMatcher.matches(query: query, candidate: snippet.content)
@@ -226,12 +250,16 @@ final class PickerController: NSObject, NSWindowDelegate {
             )
         }
 
-        // Clipboard history: fuzzy-filtered and ranked by score when querying.
+        // Clipboard history: narrowed to the active kind scope (FLT-2, FLT-3), then
+        // fuzzy-filtered and ranked by score when querying.
+        let scoped = scope == nil ? history.items : history.items.filter { Self.matchesScope($0, scope!) }
         let clipItems: [ClipboardItem]
-        if query.isEmpty {
-            clipItems = history.items
+        if !showClips {
+            clipItems = []
+        } else if query.isEmpty {
+            clipItems = scoped
         } else {
-            clipItems = history.items
+            clipItems = scoped
                 .compactMap { item -> (ClipboardItem, Int)? in
                     guard let score = FuzzyMatcher.score(query: query, candidate: item.preview) else { return nil }
                     return (item, score)
@@ -262,11 +290,28 @@ final class PickerController: NSObject, NSWindowDelegate {
 
         model.pinnedRows = pinned
         model.clipRows = clips
+        clampSelection()
+        // The preview resizes itself: the `.preview` surface re-renders whenever the
+        // rows or selection change and reports its new size through `applyPreviewSize`.
+    }
+
+    /// Whether a history item belongs to a kind scope (FLT-3). `#pinned` is handled
+    /// by hiding history entirely, so it never matches a clip here.
+    private static func matchesScope(_ item: ClipboardItem, _ scope: QueryScope) -> Bool {
+        switch scope {
+        case .image:  return item.kind == .image
+        case .file:   return item.kind == .file
+        case .text:   return item.kind == .text
+        case .link:   return item.kind == .text && item.classification == "link"
+        case .pinned: return false
+        }
+    }
+
+    /// Keep `selection`/`anchor` inside the current row set after a rebuild.
+    private func clampSelection() {
         let last = max(0, model.count - 1)
         if model.selection >= model.count { model.selection = last }
         if model.anchor >= model.count { model.anchor = last }
-        // The preview resizes itself: the `.preview` surface re-renders whenever the
-        // rows or selection change and reports its new size through `applyPreviewSize`.
     }
 
     /// A small Finder icon for a file path, sized for a row's leading glyph.
@@ -278,12 +323,21 @@ final class PickerController: NSObject, NSWindowDelegate {
 
     // MARK: Selection
 
-    private func move(_ delta: Int) {
+    private func move(_ delta: Int, isRepeat: Bool = false) {
         let n = model.count
         guard n > 0 else { return }
         // Keyboard navigation should scroll the selection into view.
         model.suppressAutoScroll = false
-        model.selection = (model.selection + delta + n) % n
+        let next = model.selection + delta
+        if next < 0 || next >= n {
+            // At a boundary. Wrap only on a deliberate fresh press — while the key
+            // is auto-repeating (held down) we clamp, so reaching an end stops there
+            // instead of looping straight past it. Release and press again to wrap.
+            if isRepeat { return }
+            model.selection = (next + n) % n
+        } else {
+            model.selection = next
+        }
         // A plain arrow collapses any multi-selection back to a single row.
         model.anchor = model.selection
     }
@@ -305,7 +359,41 @@ final class PickerController: NSObject, NSWindowDelegate {
     private func commit(at index: Int, mode: Paster.PasteMode, asPath: Bool = false) {
         let rows = model.allRows
         guard index >= 0, index < rows.count else { return }
+        // A suggestion row isn't pasteable — selecting it completes its scope token
+        // (FLT-5), whether reached by Enter or a click.
+        if rows[index].kind == .suggestion {
+            completeToken(rows[index].scopeToken)
+            return
+        }
         performPaste(row: rows[index], mode: mode, asPath: asPath)
+    }
+
+    /// Replace the query with a completed scope token and re-filter (FLT-5). The
+    /// trailing space moves the parser out of "completing" into an active scope.
+    private func completeToken(_ scope: QueryScope?) {
+        guard let scope else { return }
+        model.query = scope.token + " "
+        model.selection = 0
+        model.anchor = 0
+        rebuildRows()
+    }
+
+    private func completeSelectedToken() {
+        let rows = model.allRows
+        guard model.selection >= 0, model.selection < rows.count else { return }
+        completeToken(rows[model.selection].scopeToken)
+    }
+
+    /// ⌘A selects every currently-listed row, so a scoped list can be swept in one
+    /// gesture: `#image` · ⌘A · ⌘⌫ (FLT-9). Scope-respecting for free — the list is
+    /// already narrowed. A no-op while the token autocomplete is showing.
+    private func selectAllVisible() {
+        guard !model.isCompleting else { return }
+        let n = model.count
+        guard n > 0 else { return }
+        model.suppressAutoScroll = false
+        model.anchor = 0
+        model.selection = n - 1
     }
 
     private func commitSelected(mode: Paster.PasteMode, asPath: Bool = false) {
@@ -469,18 +557,24 @@ final class PickerController: NSObject, NSWindowDelegate {
         let code = Int(event.keyCode)
         let chars = event.charactersIgnoringModifiers ?? ""
 
+        // Custom "delete item" shortcut (default ⌘D), matched before the per-modifier
+        // branches so any chosen combo fires. The recorder forbids Backspace-key
+        // combos, so ⌘⌫ can never land here and stays "clear the search" below.
+        if let combo = KeyCombo.from(event: event), combo == prefs.deleteItemHotKey {
+            deleteSelected(); return true
+        }
+
         // Command combinations first — these fire regardless of filter text.
         if cmd {
             if let n = Int(chars), (1...9).contains(n) { pastePinnedSlot(n); return true }
+            if chars == "a" { selectAllVisible(); return true }
             if chars == "p" { promoteSelected(); return true }
             if chars == "r" { revealSelectedInFinder(); return true }
             if code == kVK_Delete {
-                // While searching, ⌘⌫ clears the query to the start (standard
-                // "delete to beginning of line"). With no query it falls back to
-                // deleting the selected item.
-                if model.query.isEmpty {
-                    deleteSelected()
-                } else {
+                // ⌘⌫ clears the search (delete-to-start-of-line), matching macOS
+                // text fields and the reflex they train. Never destructive — item
+                // deletion is the configurable shortcut above (⌘D) plus ⌃X.
+                if !model.query.isEmpty {
                     model.query = ""
                     model.selection = 0
                     model.anchor = 0
@@ -495,6 +589,17 @@ final class PickerController: NSObject, NSWindowDelegate {
         switch code {
         case kVK_Escape:
             hide(); return true
+        case kVK_Tab:
+            // While the autocomplete is showing, Tab completes the highlighted
+            // token. Otherwise it steps through the list like the arrows —
+            // Tab = next, Shift+Tab = previous — sharing their stop-at-end-on-hold
+            // behaviour so all three navigation keys feel the same.
+            if model.isCompleting {
+                completeSelectedToken()
+            } else {
+                shift ? move(-1, isRepeat: event.isARepeat) : move(1, isRepeat: event.isARepeat)
+            }
+            return true
         case kVK_Return, kVK_ANSI_KeypadEnter:
             if option {
                 // ⌥⏎ pastes a file's path as text (harmless for non-file rows,
@@ -505,9 +610,9 @@ final class PickerController: NSObject, NSWindowDelegate {
             }
             return true
         case kVK_DownArrow:
-            shift ? extend(1) : move(1); return true
+            shift ? extend(1) : move(1, isRepeat: event.isARepeat); return true
         case kVK_UpArrow:
-            shift ? extend(-1) : move(-1); return true
+            shift ? extend(-1) : move(-1, isRepeat: event.isARepeat); return true
         case kVK_Delete: // backspace edits the query
             if option {
                 // ⌥⌫ deletes the previous word of the query (macOS convention).
@@ -521,10 +626,12 @@ final class PickerController: NSObject, NSWindowDelegate {
             break
         }
 
-        // Emacs-style navigation.
+        // Emacs-style navigation, plus ⌃X as a fixed delete alias (Raycast parity)
+        // alongside the configurable shortcut above.
         if ctrl {
-            if chars == "n" { move(1); return true }
-            if chars == "p" { move(-1); return true }
+            if chars == "n" { move(1, isRepeat: event.isARepeat); return true }
+            if chars == "p" { move(-1, isRepeat: event.isARepeat); return true }
+            if chars == "x" { deleteSelected(); return true }
             return false
         }
 

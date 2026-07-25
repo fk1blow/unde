@@ -136,18 +136,26 @@ struct PickerView: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 16, weight: .regular))
                 .foregroundColor(Theme.neutral500)
-            ZStack(alignment: .leading) {
-                if model.query.isEmpty {
-                    Text("Search snippets and clipboard…")
-                        .font(.system(size: 17))
-                        .foregroundColor(Theme.neutral500)
+            HStack(spacing: 8) {
+                // An active kind scope shows as a pill (FLT-6), with only the
+                // residual fuzzy text drawn after it — not the raw "#image foo".
+                if let scope = model.scope {
+                    ScopePill(text: scope.rawValue)
                 }
-                HStack(spacing: 1) {
-                    Text(model.query)
-                        .font(.system(size: 17))
-                        .foregroundColor(Theme.text)
-                    Caret()
+                ZStack(alignment: .leading) {
+                    if model.query.isEmpty {
+                        Text("Search snippets and clipboard…")
+                            .font(.system(size: 17))
+                            .foregroundColor(Theme.neutral600)
+                    }
+                    HStack(spacing: 1) {
+                        Text(model.scope != nil ? model.queryText : model.query)
+                            .font(.system(size: 17))
+                            .foregroundColor(Theme.text)
+                        Caret()
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             KBD("esc")
@@ -162,27 +170,44 @@ struct PickerView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
-                    if !model.pinnedRows.isEmpty {
-                        sectionHeader("Pinned snippets")
-                            .id(Self.pinnedHeaderID)
-                        ForEach(Array(model.pinnedRows.enumerated()), id: \.element.id) { offset, row in
+                    if model.isCompleting {
+                        // Token autocomplete: the suggestion list replaces results
+                        // while a partial `#…` is being typed (FLT-5).
+                        sectionHeader("Filter by kind")
+                        ForEach(Array(model.suggestionRows.enumerated()), id: \.element.id) { offset, row in
                             rowView(row, index: offset)
                         }
-                    }
-                    if !model.clipRows.isEmpty {
-                        sectionHeader("Clipboard history")
-                            .padding(.top, model.pinnedRows.isEmpty ? 0 : 6)
-                            .id(Self.clipHeaderID)
-                        ForEach(Array(model.clipRows.enumerated()), id: \.element.id) { offset, row in
-                            rowView(row, index: model.pinnedRows.count + offset)
+                    } else {
+                        // With a scope active, the search-row pill already names the
+                        // category, so the section header would just repeat it — show
+                        // headers only when unscoped.
+                        let showHeaders = model.scope == nil
+                        if !model.pinnedRows.isEmpty {
+                            if showHeaders {
+                                sectionHeader("Pinned snippets")
+                                    .id(Self.pinnedHeaderID)
+                            }
+                            ForEach(Array(model.pinnedRows.enumerated()), id: \.element.id) { offset, row in
+                                rowView(row, index: offset)
+                            }
                         }
-                    }
-                    if model.isEmpty {
-                        Text("No matches for “\(model.query)”")
-                            .font(.system(size: 13))
-                            .foregroundColor(Theme.neutral600)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 34)
+                        if !model.clipRows.isEmpty {
+                            if showHeaders {
+                                sectionHeader("Clipboard history")
+                                    .padding(.top, model.pinnedRows.isEmpty ? 0 : 6)
+                                    .id(Self.clipHeaderID)
+                            }
+                            ForEach(Array(model.clipRows.enumerated()), id: \.element.id) { offset, row in
+                                rowView(row, index: model.pinnedRows.count + offset)
+                            }
+                        }
+                        if model.isEmpty {
+                            Text(model.emptyMessage)
+                                .font(.system(size: 13))
+                                .foregroundColor(Theme.neutral600)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 34)
+                        }
                     }
                 }
                 .padding(8)
@@ -204,10 +229,12 @@ struct PickerView: View {
                 // When landing on the first row of a section, target the section
                 // header instead of the row, so the label above it is revealed
                 // rather than left clipped at the top edge.
+                // Headers only exist when unscoped; with a scope active, target the
+                // row itself so scrollTo doesn't reference a header that isn't there.
                 let targetID: String
-                if newValue == 0, !model.pinnedRows.isEmpty {
+                if model.scope == nil, newValue == 0, !model.pinnedRows.isEmpty {
                     targetID = Self.pinnedHeaderID
-                } else if newValue == model.pinnedRows.count, !model.clipRows.isEmpty {
+                } else if model.scope == nil, newValue == model.pinnedRows.count, !model.clipRows.isEmpty {
                     targetID = Self.clipHeaderID
                 } else {
                     targetID = rows[newValue].id
@@ -409,8 +436,13 @@ struct PickerView: View {
             // footer doesn't reflow as the selection changes.
             hint("⏎", "paste")
             hint("⌘P", "pin")
-            hint("⌘⌫", "delete")
-            hint("⌘1–9", "jump")
+            hint(model.deleteHintKey, "delete")
+            hint("⌘A", "all")
+            // Only advertise ⌘n jump when there are pinned slots, sized to how many
+            // actually exist ("⌘1", "⌘1–3") rather than a fixed, mostly-empty ⌘1–9.
+            if let jump = model.jumpHintKey {
+                hint(jump, "jump")
+            }
             // Selection-specific verbs append at the tail as accent chips so they
             // read as extra, contextual actions for this row — distinct from the
             // always-on hints. File rows are the only case today, and they don't
@@ -539,6 +571,28 @@ struct PickerRow: View {
         .overlay(
             RoundedRectangle(cornerRadius: Theme.radiusRow, style: .continuous)
                 .strokeBorder(active ? Theme.rowSelectedStroke : Color.clear, lineWidth: 1)
+        )
+    }
+}
+
+/// The active kind-scope indicator shown in the search row (FLT-6), so the mode
+/// the list is filtered by is never invisible.
+private struct ScopePill: View {
+    let text: String
+    var body: some View {
+        HStack(spacing: 4) {
+            Text("#")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(Theme.accent300.opacity(0.7))
+            Text(text)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(Theme.accent300)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .background(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(Theme.accent.opacity(0.18))
         )
     }
 }
