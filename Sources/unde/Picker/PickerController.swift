@@ -31,6 +31,14 @@ final class PickerController: NSObject, NSWindowDelegate {
     private var isDismissing = false
     private var cancellables = Set<AnyCancellable>()
 
+    // Hover-jitter guard. While non-nil, hover-driven selection is suppressed until
+    // the pointer moves past `hoverWakeThreshold` from this anchor. Set on every open
+    // and on every handled keystroke, so the list reflowing under a still pointer (or
+    // a stray trackpad brush while typing) can't drag the selection off the top match.
+    // Cleared by the first deliberate pointer move, which re-enables normal hovering.
+    private var hoverAnchor: NSPoint?
+    private static let hoverWakeThreshold: CGFloat = 4.0
+
     init(history: HistoryStore, snippets: SnippetStore, paster: Paster, prefs: Preferences, imageStore: ImageStore? = nil) {
         self.history = history
         self.snippets = snippets
@@ -44,6 +52,17 @@ final class PickerController: NSObject, NSWindowDelegate {
             onClickRow: { [weak self] index in self?.commit(at: index, mode: .pasteInPlace) },
             onHoverRow: { [weak self] index in
                 guard let self else { return }
+                // Ignore hover that isn't a deliberate pointer move: after an open or
+                // a keystroke the list reflows under a still cursor (and a trackpad
+                // tap can nudge it), which fires a spurious `.onHover` that would drag
+                // selection off the top match. Honour the hover only once the pointer
+                // has genuinely moved past the threshold — then resume normal hovering.
+                if let anchor = self.hoverAnchor {
+                    let now = NSEvent.mouseLocation
+                    let dx = now.x - anchor.x, dy = now.y - anchor.y
+                    guard dx * dx + dy * dy >= Self.hoverWakeThreshold * Self.hoverWakeThreshold else { return }
+                    self.hoverAnchor = nil
+                }
                 // Hover-driven selection: highlight the row but don't scroll the
                 // list under the pointer. A hover collapses any keyboard-built
                 // range back to the single hovered row.
@@ -98,6 +117,9 @@ final class PickerController: NSObject, NSWindowDelegate {
         model.query = ""
         model.selection = 0
         model.anchor = 0
+        // The panel opens under the cursor; guard against its resting spot stealing
+        // the default first-row selection until the user deliberately moves.
+        hoverAnchor = NSEvent.mouseLocation
         model.accessibilityTrusted = Permissions.isAccessibilityTrusted
         model.showPreview = prefs.showPreview
         model.uiScale = CGFloat(prefs.uiScale)
@@ -536,7 +558,11 @@ final class PickerController: NSObject, NSWindowDelegate {
     private func installEventMonitor() {
         eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
             guard let self else { return event }
-            return self.handleKeyDown(event) ? nil : event
+            let handled = self.handleKeyDown(event)
+            // Re-arm the hover guard on any handled key: the ensuing list reflow /
+            // selection change must not be undone by a hover from the still pointer.
+            if handled { self.hoverAnchor = NSEvent.mouseLocation }
+            return handled ? nil : event
         }
     }
 
@@ -619,6 +645,10 @@ final class PickerController: NSObject, NSWindowDelegate {
                 deleteWordFromQuery()
             } else if !model.query.isEmpty {
                 model.query.removeLast()
+                // Any query change snaps the highlight back to the first result, so
+                // editing the search never leaves it stranded on a stale lower row.
+                model.selection = 0
+                model.anchor = 0
                 rebuildRows()
             }
             return true

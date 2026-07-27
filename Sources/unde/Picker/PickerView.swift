@@ -145,12 +145,12 @@ struct PickerView: View {
                 ZStack(alignment: .leading) {
                     if model.query.isEmpty {
                         Text("Search snippets and clipboard…")
-                            .font(.system(size: 17))
+                            .font(.system(size: 15))
                             .foregroundColor(Theme.neutral600)
                     }
                     HStack(spacing: 1) {
                         Text(model.scope != nil ? model.queryText : model.query)
-                            .font(.system(size: 17))
+                            .font(.system(size: 15))
                             .foregroundColor(Theme.text)
                         Caret()
                     }
@@ -160,6 +160,11 @@ struct PickerView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             KBD("esc")
         }
+        // Pin the row to a constant content height. Without this it sizes to its
+        // tallest child, so forming a scope pill (taller than the bare query text +
+        // caret) grew the row a few points and shoved the divider and list below it
+        // down — the "input container shifts" jump when typing a `#` tag.
+        .frame(height: 24)
         .padding(.horizontal, 18)
         .padding(.vertical, 15)
     }
@@ -184,7 +189,7 @@ struct PickerView: View {
                         let showHeaders = model.scope == nil
                         if !model.pinnedRows.isEmpty {
                             if showHeaders {
-                                sectionHeader("Pinned snippets")
+                                sectionHeader("Pinned")
                                     .id(Self.pinnedHeaderID)
                             }
                             ForEach(Array(model.pinnedRows.enumerated()), id: \.element.id) { offset, row in
@@ -193,7 +198,7 @@ struct PickerView: View {
                         }
                         if !model.clipRows.isEmpty {
                             if showHeaders {
-                                sectionHeader("Clipboard history")
+                                sectionHeader("History")
                                     .padding(.top, model.pinnedRows.isEmpty ? 0 : 6)
                                     .id(Self.clipHeaderID)
                             }
@@ -425,7 +430,13 @@ struct PickerView: View {
                          active: active, showPaste: showPaste)
             .contentShape(Rectangle())
             .onTapGesture { onClickRow(index) }
-            .onHover { if $0 { onHoverRow(index) } }
+            // Continuous (not enter/exit) hover: fires as the pointer moves *within*
+            // a row too, so the hover-jitter guard can wake on movement over the row
+            // it's already on — `.onHover` only fires on boundary crossings, which
+            // left the current row unselectable until you exited and re-entered it.
+            .onContinuousHover { phase in
+                if case .active = phase { onHoverRow(index) }
+            }
     }
 
     // MARK: Footer
@@ -621,7 +632,7 @@ private struct Caret: View {
     var body: some View {
         Rectangle()
             .fill(Theme.accent)
-            .frame(width: 2, height: 20)
+            .frame(width: 2, height: 18)
             .opacity(on ? 1 : 0)
             .onAppear {
                 withAnimation(.easeInOut(duration: 0.55).repeatForever(autoreverses: true)) {
