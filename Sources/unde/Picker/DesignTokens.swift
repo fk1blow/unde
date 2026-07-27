@@ -23,12 +23,12 @@ enum Theme {
     static let accent700 = Color(hex: 0x5D5294)
     static let accent900 = Color(hex: 0x2B2741)
 
-    // Row selection
-    static let rowSelectedBG = accent900
-    static let rowSelectedStroke = accent700
+    // Row selection — no border; the fill alone marks the selection, so it carries
+    // a touch more contrast against `surface` than the old bordered `accent900` did.
+    static let rowSelectedBG = Color(hex: 0x332F4F)
 
-    // Radii
-    static let radiusPanel: CGFloat = 14
+    // Radii — panel radius matches Raycast's card (rounded.lg, 10pt).
+    static let radiusPanel: CGFloat = 10
     static let radiusRow: CGFloat = 8
 }
 
