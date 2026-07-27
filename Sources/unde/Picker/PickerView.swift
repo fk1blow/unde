@@ -133,9 +133,6 @@ struct PickerView: View {
 
     private var searchRow: some View {
         HStack(spacing: 12) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 16, weight: .regular))
-                .foregroundColor(Theme.neutral500)
             HStack(spacing: 8) {
                 // An active kind scope shows as a pill (FLT-6), with only the
                 // residual fuzzy text drawn after it — not the raw "#image foo".
@@ -164,9 +161,9 @@ struct PickerView: View {
         // tallest child, so forming a scope pill (taller than the bare query text +
         // caret) grew the row a few points and shoved the divider and list below it
         // down — the "input container shifts" jump when typing a `#` tag.
-        .frame(height: 24)
+        .frame(height: 22)
         .padding(.horizontal, 18)
-        .padding(.vertical, 15)
+        .padding(.vertical, 10)
     }
 
     // MARK: List
@@ -470,9 +467,9 @@ struct PickerView: View {
         // Fixed content height so the chips' padding never makes the footer taller
         // than the plain-text hints — otherwise landing on a file row nudges the
         // whole layout vertically.
-        .frame(height: 20)
+        .frame(height: 16)
         .padding(.horizontal, 18)
-        .padding(.vertical, 14)
+        .padding(.vertical, 9)
     }
 
     private func hint(_ key: String, _ label: String) -> some View {
@@ -579,10 +576,6 @@ struct PickerRow: View {
             RoundedRectangle(cornerRadius: Theme.radiusRow, style: .continuous)
                 .fill(active ? Theme.rowSelectedBG : Color.clear)
         )
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.radiusRow, style: .continuous)
-                .strokeBorder(active ? Theme.rowSelectedStroke : Color.clear, lineWidth: 1)
-        )
     }
 }
 
@@ -600,7 +593,7 @@ private struct ScopePill: View {
                 .foregroundColor(Theme.accent300)
         }
         .padding(.horizontal, 8)
-        .padding(.vertical, 3)
+        .padding(.vertical, 2)
         .background(
             RoundedRectangle(cornerRadius: 7, style: .continuous)
                 .fill(Theme.accent.opacity(0.18))
